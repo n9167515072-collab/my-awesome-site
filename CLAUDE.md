@@ -29,6 +29,9 @@ public/           Static assets
 references/       Reference material to consult while building the site
 concepts/         Competing creative concepts (each marked with a STATUS;
                   none are approved until art-director + client choose one)
+assets/
+  prototype/      AI-generated art-direction comps — prototype-only, never
+                  production truth (see DESIGN.md's asset fidelity notice)
 .claude/
   agents/         Custom subagent definitions (the design studio, see below)
   skills/         Custom skills
@@ -150,5 +153,8 @@ that "looks right" can still render broken, misaligned, or unreadable.
 
 ## Notes
 
-- No homepage or page designs exist yet — `src/app/page.tsx` is a
-  placeholder. Do not treat it as a design reference.
+- No homepage or page designs are implemented yet — `src/app/page.tsx` is
+  a placeholder. Do not treat it as a design reference.
+- `DESIGN.md` exists as a **prototype-stage seed**, written before any
+  code — read its "Asset fidelity notice" before using any image it
+  references; several are AI-generated comps, not production assets.
