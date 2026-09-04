@@ -66,6 +66,29 @@ sources/licenses). Use them:
   (`/impeccable audit`, `critique`, `polish`, etc.); its in-browser "live"
   variant mode was intentionally not vendored, everything else works.
 
+### Division of labor (avoid redundant/conflicting reviews)
+
+The subagents above and these skills overlap in what they look at.
+Default to this split rather than running every mechanism on every
+change:
+
+- **Creative direction, pre-build:** `art-director`, informed by the
+  `frontend-design` skill's anti-pattern/typography guidance.
+- **Post-build independent review, the pipeline's actual gate:**
+  `visual-critic`, `ux-critic`, `qa-reviewer`. They may pull in
+  `impeccable`'s `critique`/`audit` output or the Vercel skills' rules as
+  supporting evidence, but their verdict is what the design process in
+  this file treats as "independent reviews" — don't also run a separate
+  `impeccable critique` pass and treat it as a second, independent gate.
+- **Rule references, not standalone gates:** `web-design-guidelines` and
+  `react-best-practices` are checklists `qa-reviewer` (and whoever's
+  implementing) should check against, not separate review steps to run
+  in parallel.
+- **`impeccable`'s other commands** (`shape`, `init`, `document`,
+  `extract`, `polish`, `bolder`/`quieter`/`typeset`/etc.) are workflow
+  tools for whoever is doing the design/implementation work, not
+  reviewers — use them freely, they don't compete with the subagents.
+
 ## Design principles (permanent)
 
 - Originality over speed. Never default to generic SaaS design.
