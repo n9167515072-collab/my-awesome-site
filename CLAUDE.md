@@ -51,6 +51,21 @@ Four subagents in `.claude/agents/` act as an independent studio. Use them
 The three critics analyze and report; they don't implement fixes
 themselves. Treat their findings as input, not as optional commentary.
 
+## Skills
+
+Project-scoped skills live in `.claude/skills/` (see its `README.md` for
+sources/licenses). Use them:
+
+- `frontend-design` (Anthropic) — distinctive visual design guidance;
+  reach for this before/while building new UI.
+- `web-design-guidelines` (Vercel) — reviews code against Vercel's Web
+  Interface Guidelines (accessibility, forms, performance, etc.).
+- `react-best-practices` (Vercel) — React/Next.js performance rules;
+  apply when writing or reviewing components and data fetching.
+- `impeccable` (community) — design critique/audit/polish commands
+  (`/impeccable audit`, `critique`, `polish`, etc.); its in-browser "live"
+  variant mode was intentionally not vendored, everything else works.
+
 ## Design principles (permanent)
 
 - Originality over speed. Never default to generic SaaS design.
