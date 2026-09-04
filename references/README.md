@@ -3,7 +3,7 @@
 Reference material for this project (design references, briefs, external
 docs) to consult while building the site.
 
-- `creative-direction-brief.md` — the client's proposed visual/narrative
-  concept and reference sites for the LunaLum site. A hypothesis to
-  pressure-test (via `art-director`, `frontend-design`), not a locked
-  decision — see `PRODUCT.md` for confirmed product facts.
+- `REFERENCE-NOTES.md` — reference websites and visual references only:
+  what quality each one demonstrates, plus anti-references. No proposed
+  website concept lives here — see `concepts/` for that, and `PRODUCT.md`
+  for confirmed product facts.

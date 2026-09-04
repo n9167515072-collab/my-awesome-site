@@ -27,6 +27,8 @@ src/
   types/          Shared TypeScript types
 public/           Static assets
 references/       Reference material to consult while building the site
+concepts/         Competing creative concepts (each marked with a STATUS;
+                  none are approved until art-director + client choose one)
 .claude/
   agents/         Custom subagent definitions (the design studio, see below)
   skills/         Custom skills
