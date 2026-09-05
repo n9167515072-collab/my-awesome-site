@@ -1,14 +1,21 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import Image from "next/image";
 import * as THREE from "three";
 
 import { Card3D } from "@/components/object-kit/Card3D";
 import { buildStackLayout, type CardLayout } from "@/components/object-kit/DeckStack3D";
 import { ALICE_DECK, DECKS, type World } from "@/components/object-kit/deck-config";
-import { AliceBoxRupture, getRuptureBandY, makeGlowTexture } from "./AliceBoxRupture";
+import { AliceBoxGlow } from "./AliceBoxGlow";
 import { BurstVFX } from "./BoxBurstVFX";
+import { makeGlowTexture } from "./glowTexture";
+import aliceMacro from "../../../assets/prototype/03-alice-macro-prototype.png";
+import vitrajiMacro from "../../../assets/prototype/04-vitraji-macro-prototype.png";
+
+const CLOSEUP_IMAGE: Record<World, typeof aliceMacro> = { alice: aliceMacro, vitraji: vitrajiMacro };
+const DECK_LABEL: Record<World, string> = { alice: "АЛИСА", vitraji: "ВИТРАЖИ" };
 
 // ---------------------------------------------------------------------------
 // math helpers — deterministic, manual (no motion/react useTransform here;
@@ -41,23 +48,27 @@ const STACK_CENTER: Record<World, THREE.Vector3> = {
 };
 
 const BOX_POS = new THREE.Vector3(0, 0, 1.7);
-const { bandH: RUPTURE_BAND_H, topOfBase: RUPTURE_TOP_OF_BASE } = getRuptureBandY(ALICE_DECK.box.size);
-// Cards spawn just inside the ruptured opening, then shoot straight up
-// through it (LAUNCH_POS) before diverging into the chaos cloud — never
-// from a floating point disconnected from the box.
-const RELEASE_POS = BOX_POS.clone().add(new THREE.Vector3(0, RUPTURE_TOP_OF_BASE + RUPTURE_BAND_H * 0.5, 0));
-const LAUNCH_POS = BOX_POS.clone().add(new THREE.Vector3(0, RUPTURE_TOP_OF_BASE + RUPTURE_BAND_H + 0.6, 0));
+// The box never opens — cards spawn just inside its (intact) top and shoot
+// straight up through that region (LAUNCH_POS) before diverging.
+const BOX_TOP_Y = ALICE_DECK.box.size.h / 2;
+const RELEASE_POS = BOX_POS.clone().add(new THREE.Vector3(0, BOX_TOP_Y - 0.15, 0));
+const LAUNCH_POS = BOX_POS.clone().add(new THREE.Vector3(0, BOX_TOP_Y + 0.75, 0));
 const LAUNCH_T = 0.32; // fraction of each card's travel window spent shooting straight up before diverging
 
-// Phase durations (seconds since the click). Only Alice's box opens — the
-// intro deliberately starts from one object, not two. The opening beat is
-// its own escalation: CALM -> PRESSURE (seam glow builds) -> RUPTURE (the
-// top splits) -> BURST (light + particles peak, first cards shoot out).
+// Where the selected deck rushes toward the camera for the close-up, and
+// where the other deck recedes to while it happens.
+const CLOSEUP_CENTER = new THREE.Vector3(0, 0, 4.3);
+const CLOSEUP_SCALE = 2.5;
+const RECEDE_SCALE = 0.25;
+
+// Phase durations (seconds since the click). Only Alice's box is involved —
+// the intro deliberately starts from one object, not two. The box stays
+// intact throughout: CALM -> INTERNAL LIGHT (seam glow builds) -> INTENSITY
+// (light peaks, particles fire) -> CARD BURST (cards shoot out of the top).
 const CALM_END = 0.5;
-const PRESSURE_END = 1.2;
-const RUPTURE_END = 1.6;
-const BURST_END = 2.0;
-const OPEN_END = BURST_END;
+const LIGHT_END = 1.3;
+const INTENSITY_END = 1.9;
+const OPEN_END = INTENSITY_END;
 
 const T_RELEASE = 1.7;
 const T_CHAOS_HOLD = 1.3;
@@ -66,23 +77,17 @@ const RELEASE_END = OPEN_END + T_RELEASE;
 const CHAOS_END = RELEASE_END + T_CHAOS_HOLD;
 const ORGANIZE_END = CHAOS_END + T_ORGANIZE;
 
-/** 0..1 — internal light leaking through the still-closed seam, before anything moves. */
+/** 0..1 — internal light leaking through the closed seam, before it intensifies. */
 function pressureLevel(t: number) {
   if (t < CALM_END) return 0;
-  if (t < PRESSURE_END) return easeInOutCubic(clamp01((t - CALM_END) / (PRESSURE_END - CALM_END)));
+  if (t < LIGHT_END) return easeInOutCubic(clamp01((t - CALM_END) / (LIGHT_END - CALM_END)));
   return 1;
 }
-/** 0..1 — how far the two top fragments have split apart: a readable tear across the whole window, not an instant snap. */
-function ruptureLevel(t: number) {
-  if (t < PRESSURE_END) return 0;
-  if (t < RUPTURE_END) return easeInOutCubic(clamp01((t - PRESSURE_END) / (RUPTURE_END - PRESSURE_END)));
-  return 1;
-}
-/** 0..1 — the light/particle burst spike: rises through the burst window, then decays as the card cloud takes over. */
+/** 0..1 — the light intensifying toward the burst, then decaying as the card cloud takes over. */
 function burstLevel(t: number) {
-  if (t < RUPTURE_END) return 0;
-  if (t < BURST_END) return easeOutCubic(clamp01((t - RUPTURE_END) / (BURST_END - RUPTURE_END)));
-  return Math.max(0, 1 - clamp01((t - BURST_END) / 0.9));
+  if (t < LIGHT_END) return 0;
+  if (t < INTENSITY_END) return easeOutCubic(clamp01((t - LIGHT_END) / (INTENSITY_END - LIGHT_END)));
+  return Math.max(0, 1 - clamp01((t - INTENSITY_END) / 0.9));
 }
 
 type FlightSpec = {
@@ -95,7 +100,7 @@ type FlightSpec = {
   chaosScale: number;
   showsBackInChaos: boolean;
   revealAt: number;
-  /** First few cards out of the rupture get a brief accompanying glow trail. */
+  /** First few cards out of the box get a brief accompanying glow trail. */
   hasLaunchGlow: boolean;
 };
 
@@ -160,8 +165,9 @@ function FlightCard({
   tRef,
   glowTexture,
   fanState,
-  flipState,
-  onToggleFlip,
+  closeupGroup,
+  closeupGroupRef,
+  onSelectDeck,
 }: {
   spec: FlightSpec;
   phase: Phase;
@@ -169,8 +175,9 @@ function FlightCard({
   tRef: React.RefObject<number>;
   glowTexture: THREE.Texture;
   fanState: Record<World, boolean>;
-  flipState: Set<string>;
-  onToggleFlip: () => void;
+  closeupGroup: World | null;
+  closeupGroupRef: React.RefObject<World | null>;
+  onSelectDeck: (g: World) => void;
 }) {
   const deck = DECKS[spec.group];
   const groupRef = useRef<THREE.Group>(null);
@@ -178,11 +185,17 @@ function FlightCard({
 
   const restPos = useMemo(() => STACK_CENTER[spec.group].clone().add(new THREE.Vector3(...spec.layout.rest.pos)), [spec]);
   const fanPos = useMemo(() => STACK_CENTER[spec.group].clone().add(new THREE.Vector3(...spec.layout.fan.pos)), [spec]);
+  const closeupPos = useMemo(
+    () => CLOSEUP_CENTER.clone().add(new THREE.Vector3(spec.layout.rest.pos[0] * 0.4, spec.layout.rest.pos[1] * 0.4, spec.layout.rest.pos[2] * 0.4)),
+    [spec],
+  );
+  const recedePos = useMemo(() => STACK_CENTER[spec.group].clone().add(new THREE.Vector3(0, 0, -3.4)), [spec]);
   const restRotZ = spec.layout.rest.rot[2];
   const fanRotZ = spec.layout.fan.rot[2];
 
   const settledPos = useRef(restPos.clone());
   const settledRotZ = useRef(restRotZ);
+  const settledScale = useRef(1);
 
   const [flippedState, setFlippedState] = useState(spec.showsBackInChaos);
   const flippedRef = useRef(spec.showsBackInChaos);
@@ -191,7 +204,7 @@ function FlightCard({
     const t = tRef.current;
     const group = groupRef.current;
 
-    const shouldBeFlipped = t < spec.revealAt ? spec.showsBackInChaos : flipState.has(spec.id);
+    const shouldBeFlipped = t < spec.revealAt && spec.showsBackInChaos;
     if (shouldBeFlipped !== flippedRef.current) {
       flippedRef.current = shouldBeFlipped;
       setFlippedState(shouldBeFlipped);
@@ -215,7 +228,7 @@ function FlightCard({
       let pos: THREE.Vector3;
       let divergeT: number;
       if (travelT < LAUNCH_T) {
-        // shoots straight out through the rupture opening, aligned with the burst
+        // shoots straight up out of the box, aligned with the light burst
         divergeT = 0;
         pos = RELEASE_POS.clone().lerp(LAUNCH_POS, easeOutCubic(travelT / LAUNCH_T));
       } else {
@@ -228,6 +241,7 @@ function FlightCard({
       group.scale.setScalar(popScale * lerp(1, spec.chaosScale, eased));
       settledPos.current.copy(group.position);
       settledRotZ.current = lerp(0, spec.chaosRot.z, divergeT);
+      settledScale.current = 1;
 
       if (spec.hasLaunchGlow && trailRef.current) {
         const glowT = 1 - clamp01(travelT / (LAUNCH_T * 1.4));
@@ -248,22 +262,37 @@ function FlightCard({
       group.scale.setScalar(lerp(spec.chaosScale, 1, orgT));
       settledPos.current.copy(group.position);
       settledRotZ.current = lerp(spec.chaosRot.z, restRotZ, orgT);
+      settledScale.current = 1;
     } else {
       if (trailRef.current) trailRef.current.visible = false;
-      const fanned = fanState[spec.group];
-      const target = fanned ? fanPos : restPos;
-      const targetRotZ = fanned ? fanRotZ : restRotZ;
-      settledPos.current.x = lerp(settledPos.current.x, target.x, 0.14);
-      settledPos.current.y = lerp(settledPos.current.y, target.y, 0.14);
-      settledPos.current.z = lerp(settledPos.current.z, target.z, 0.14);
-      settledRotZ.current = lerp(settledRotZ.current, targetRotZ, 0.14);
+      const activeCloseup = closeupGroupRef.current;
+      let target: THREE.Vector3;
+      let targetRotZ: number;
+      let targetScale: number;
+      if (activeCloseup === spec.group) {
+        target = closeupPos;
+        targetRotZ = 0;
+        targetScale = CLOSEUP_SCALE;
+      } else if (activeCloseup !== null) {
+        target = recedePos;
+        targetRotZ = restRotZ;
+        targetScale = RECEDE_SCALE;
+      } else {
+        const fanned = fanState[spec.group];
+        target = fanned ? fanPos : restPos;
+        targetRotZ = fanned ? fanRotZ : restRotZ;
+        targetScale = 1;
+      }
+      settledPos.current.lerp(target, 0.12);
+      settledRotZ.current = lerp(settledRotZ.current, targetRotZ, 0.12);
+      settledScale.current = lerp(settledScale.current, targetScale, 0.12);
       group.position.copy(settledPos.current);
       group.rotation.set(0, 0, settledRotZ.current);
-      group.scale.setScalar(1);
+      group.scale.setScalar(settledScale.current);
     }
   });
 
-  const interactive = phase === "catalogue" && fanState[spec.group] && spec.layout.interactiveIndex !== null;
+  const interactive = phase === "catalogue" && closeupGroup === null && fanState[spec.group] && spec.layout.interactiveIndex !== null;
 
   return (
     <group ref={groupRef}>
@@ -280,8 +309,8 @@ function FlightCard({
         flipped={flippedState}
         interactive={interactive}
         onClick={() => {
-          if (phaseRef.current !== "catalogue" || !fanState[spec.group]) return;
-          onToggleFlip();
+          if (phaseRef.current !== "catalogue" || closeupGroupRef.current !== null || !fanState[spec.group]) return;
+          onSelectDeck(spec.group);
         }}
       />
     </group>
@@ -304,28 +333,45 @@ function StackHitArea({ group, onFan }: { group: World; onFan: () => void }) {
   );
 }
 
+/** A larger hit-area behind the fanned spread — clicking the deck (not a card) opens the close-up. */
+function DeckAreaHitArea({ group, onSelect }: { group: World; onSelect: () => void }) {
+  const pos = STACK_CENTER[group];
+  return (
+    <mesh
+      position={[pos.x, pos.y, pos.z - 0.3]}
+      visible={false}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect();
+      }}
+    >
+      <planeGeometry args={[3, 2.4]} />
+    </mesh>
+  );
+}
+
 function Scene({
   phase,
   phaseRef,
   tRef,
   pressureRef,
-  ruptureRef,
   burstRef,
   fanState,
-  flipState,
+  closeupGroup,
+  closeupGroupRef,
   onToggleFan,
-  onToggleFlip,
+  onSelectDeck,
 }: {
   phase: Phase;
   phaseRef: React.RefObject<Phase>;
   tRef: React.RefObject<number>;
   pressureRef: React.RefObject<number>;
-  ruptureRef: React.RefObject<number>;
   burstRef: React.RefObject<number>;
   fanState: Record<World, boolean>;
-  flipState: Set<string>;
+  closeupGroup: World | null;
+  closeupGroupRef: React.RefObject<World | null>;
   onToggleFan: (g: World) => void;
-  onToggleFlip: (id: string) => void;
+  onSelectDeck: (g: World) => void;
 }) {
   const boxWrapperRef = useRef<THREE.Group>(null);
   const ambientRef = useRef<THREE.AmbientLight>(null);
@@ -338,7 +384,6 @@ function Scene({
     }
     const t = tRef.current;
     pressureRef.current = pressureLevel(t);
-    ruptureRef.current = ruptureLevel(t);
     burstRef.current = burstLevel(t);
 
     // exposure lift: nearby surfaces and cards read brighter right through the burst
@@ -346,7 +391,7 @@ function Scene({
     if (keyLightRef.current) keyLightRef.current.intensity = 1.1 + burstRef.current * 0.7;
 
     if (boxWrapperRef.current) {
-      const fadeT = clamp01((t - BURST_END) / 0.5);
+      const fadeT = clamp01((t - OPEN_END) / 0.5);
       const scale = 1 - fadeT;
       boxWrapperRef.current.scale.setScalar(scale);
       boxWrapperRef.current.visible = scale > 0.01;
@@ -360,14 +405,14 @@ function Scene({
       <directionalLight ref={keyLightRef} position={[2.5, 3, 4]} intensity={1.1} />
       <directionalLight position={[-3, -1, -2]} intensity={0.35} />
 
-      {/* The box stays one intact shell that ruptures into two symmetric top
-          fragments — never a hinge-flip lid — then shrinks away as a whole
-          once the release zone above it has taken over as the focus. */}
+      {/* The box stays one intact object throughout — never split or hinged
+          — and simply shrinks away as a whole once the light above it has
+          taken over as the focus. */}
       <group ref={boxWrapperRef} position={BOX_POS.toArray()}>
-        <AliceBoxRupture deck={ALICE_DECK} interactive={phase === "closed"} pressureRef={pressureRef} ruptureRef={ruptureRef} burstRef={burstRef} />
+        <AliceBoxGlow deck={ALICE_DECK} interactive={phase === "closed"} pressureRef={pressureRef} burstRef={burstRef} />
       </group>
 
-      <BurstVFX burstRef={burstRef} tRef={tRef} spawnAt={RUPTURE_END} position={RELEASE_POS} />
+      <BurstVFX burstRef={burstRef} tRef={tRef} spawnAt={LIGHT_END} position={RELEASE_POS} />
 
       {FLIGHT_SPECS.map((spec) => (
         <FlightCard
@@ -378,13 +423,16 @@ function Scene({
           tRef={tRef}
           glowTexture={glowTexture}
           fanState={fanState}
-          flipState={flipState}
-          onToggleFlip={() => onToggleFlip(spec.id)}
+          closeupGroup={closeupGroup}
+          closeupGroupRef={closeupGroupRef}
+          onSelectDeck={onSelectDeck}
         />
       ))}
 
-      {phase === "catalogue" && !fanState.alice && <StackHitArea group="alice" onFan={() => onToggleFan("alice")} />}
-      {phase === "catalogue" && !fanState.vitraji && <StackHitArea group="vitraji" onFan={() => onToggleFan("vitraji")} />}
+      {phase === "catalogue" && closeupGroup === null && !fanState.alice && <StackHitArea group="alice" onFan={() => onToggleFan("alice")} />}
+      {phase === "catalogue" && closeupGroup === null && !fanState.vitraji && <StackHitArea group="vitraji" onFan={() => onToggleFan("vitraji")} />}
+      {phase === "catalogue" && closeupGroup === null && fanState.alice && <DeckAreaHitArea group="alice" onSelect={() => onSelectDeck("alice")} />}
+      {phase === "catalogue" && closeupGroup === null && fanState.vitraji && <DeckAreaHitArea group="vitraji" onSelect={() => onSelectDeck("vitraji")} />}
     </>
   );
 }
@@ -394,10 +442,11 @@ export function ExperimentC2Transform() {
   const phaseRef = useRef<Phase>("closed");
   const tRef = useRef(0);
   const pressureRef = useRef(0);
-  const ruptureRef = useRef(0);
   const burstRef = useRef(0);
   const [fanState, setFanState] = useState<Record<World, boolean>>({ alice: false, vitraji: false });
-  const [flipState, setFlipState] = useState<Set<string>>(new Set());
+  const [closeupGroup, setCloseupGroup] = useState<World | null>(null);
+  const closeupGroupRef = useRef<World | null>(null);
+  const [closeupVisible, setCloseupVisible] = useState(false);
 
   function goPhase(next: Phase) {
     phaseRef.current = next;
@@ -413,13 +462,17 @@ export function ExperimentC2Transform() {
   function toggleFan(group: World) {
     setFanState((prev) => ({ ...prev, [group]: !prev[group] }));
   }
-  function toggleFlip(id: string) {
-    setFlipState((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function selectDeck(group: World) {
+    closeupGroupRef.current = group;
+    setCloseupGroup(group);
+    window.setTimeout(() => setCloseupVisible(true), 650);
+  }
+  function exitCloseup() {
+    setCloseupVisible(false);
+    window.setTimeout(() => {
+      closeupGroupRef.current = null;
+      setCloseupGroup(null);
+    }, 500);
   }
 
   return (
@@ -430,14 +483,15 @@ export function ExperimentC2Transform() {
           phaseRef={phaseRef}
           tRef={tRef}
           pressureRef={pressureRef}
-          ruptureRef={ruptureRef}
           burstRef={burstRef}
           fanState={fanState}
-          flipState={flipState}
+          closeupGroup={closeupGroup}
+          closeupGroupRef={closeupGroupRef}
           onToggleFan={toggleFan}
-          onToggleFlip={toggleFlip}
+          onSelectDeck={selectDeck}
         />
         <PhaseWatcher phaseRef={phaseRef} tRef={tRef} onCatalogue={() => goPhase("catalogue")} />
+        <ResponsiveCamera />
       </Canvas>
 
       {phase === "closed" && (
@@ -449,11 +503,7 @@ export function ExperimentC2Transform() {
         />
       )}
 
-      <p className="pointer-events-none absolute left-6 top-6 z-20 text-[10px] font-medium tracking-[0.3em] text-white/40 sm:left-10 sm:top-8">
-        EXPERIMENT C2 — BOX BECOMES CATALOGUE
-      </p>
-
-      {phase === "catalogue" && (
+      {phase === "catalogue" && !closeupGroup && (
         <>
           <p className="pointer-events-none absolute bottom-10 left-[28%] z-20 -translate-x-1/2 text-[11px] font-medium tracking-[0.35em] text-white/70">
             АЛИСА
@@ -463,8 +513,59 @@ export function ExperimentC2Transform() {
           </p>
         </>
       )}
+
+      {closeupGroup && (
+        <>
+          <div
+            className={`pointer-events-none absolute inset-0 z-30 transition-opacity duration-[1200ms] ease-out ${closeupVisible ? "opacity-100" : "opacity-0"}`}
+          >
+            <Image src={CLOSEUP_IMAGE[closeupGroup]} alt={`Деталь колоды «${DECK_LABEL[closeupGroup]}»`} fill priority className="object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/40" />
+          </div>
+          <button
+            type="button"
+            onClick={exitCloseup}
+            className={`pointer-events-auto absolute bottom-10 left-6 z-40 text-[11px] font-medium tracking-[0.3em] text-white/70 transition-opacity duration-500 hover:text-white sm:left-10 ${closeupVisible ? "opacity-100" : "opacity-0"}`}
+          >
+            ← НАЗАД
+          </button>
+        </>
+      )}
     </div>
   );
+}
+
+/**
+ * The two decks sit at a fixed world x-offset (±1.6). Three's `fov` prop is
+ * VERTICAL, so on a narrow/tall (portrait) viewport the derived horizontal
+ * FOV shrinks well below what's needed to keep both decks in frame — on a
+ * phone they'd render entirely off-screen. This widens the vertical fov on
+ * portrait aspects just enough to guarantee a minimum horizontal FOV,
+ * leaving desktop/landscape untouched.
+ */
+function ResponsiveCamera() {
+  const size = useThree((s) => s.size);
+  const get = useThree((s) => s.get);
+
+  useEffect(() => {
+    const { camera } = get();
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+    const aspect = size.width / size.height;
+    const desktopVFovDeg = 45;
+    let vFovDeg = desktopVFovDeg;
+    if (aspect < 1) {
+      // 46° keeps both decks' FANNED spread (the widest state, cards reach
+      // roughly ±2.0 world units from center) inside frame on a phone.
+      const minHFovRad = (46 * Math.PI) / 180;
+      const vFovRad = 2 * Math.atan(Math.tan(minHFovRad / 2) / aspect);
+      vFovDeg = Math.max(desktopVFovDeg, (vFovRad * 180) / Math.PI);
+    }
+    camera.fov = vFovDeg;
+    camera.aspect = aspect;
+    camera.updateProjectionMatrix();
+  }, [size, get]);
+
+  return null;
 }
 
 /** Lives inside the Canvas purely to watch the shared time ref and fire the one-time phase transition via real React state. */

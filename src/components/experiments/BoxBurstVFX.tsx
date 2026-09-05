@@ -4,7 +4,7 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-import { makeGlowTexture } from "./AliceBoxRupture";
+import { makeGlowTexture } from "./glowTexture";
 
 /** Deterministic pseudo-random in [0,1) — reproducible, not Math.random(). */
 function seeded(i: number) {
@@ -17,16 +17,14 @@ function clamp01(v: number) {
 
 type ParticleSpec = {
   id: number;
-  kind: "glow" | "debris";
   delay: number;
   dir: THREE.Vector3;
   speed: number;
   size: number;
-  spin: THREE.Vector3;
 };
 
-const GLOW_COUNT = 12;
-const DEBRIS_COUNT = 7;
+const GLOW_COUNT = 10; // bright warm specks
+const DUST_COUNT = 10; // small, dim light flecks
 const LIFETIME = 0.85;
 
 function buildParticles(): ParticleSpec[] {
@@ -37,23 +35,15 @@ function buildParticles(): ParticleSpec[] {
     const r3 = seeded(i * 7 + 3);
     const angle = i * 2.399963;
     const dir = new THREE.Vector3(Math.cos(angle) * (0.35 + r1 * 0.55), 1.2 + r2 * 0.9, Math.sin(angle) * (0.35 + r1 * 0.55)).normalize();
-    specs.push({ id: i, kind: "glow", delay: r3 * 0.16, dir, speed: 1.2 + r2 * 0.9, size: 0.045 + r1 * 0.05, spin: new THREE.Vector3() });
+    specs.push({ id: i, delay: r3 * 0.16, dir, speed: 1.2 + r2 * 0.9, size: 0.05 + r1 * 0.05 });
   }
-  for (let i = 0; i < DEBRIS_COUNT; i++) {
+  for (let i = 0; i < DUST_COUNT; i++) {
     const r1 = seeded(i * 11 + 1);
     const r2 = seeded(i * 11 + 2);
     const r3 = seeded(i * 11 + 3);
     const angle = i * 2.399963 + 1.3;
-    const dir = new THREE.Vector3(Math.cos(angle) * (0.5 + r1 * 0.7), 0.75 + r2 * 0.75, Math.sin(angle) * (0.5 + r1 * 0.7)).normalize();
-    specs.push({
-      id: GLOW_COUNT + i,
-      kind: "debris",
-      delay: r3 * 0.2,
-      dir,
-      speed: 0.9 + r2 * 0.7,
-      size: 0.05 + r1 * 0.04,
-      spin: new THREE.Vector3((r1 - 0.5) * 9, (r2 - 0.5) * 9, (r3 - 0.5) * 9),
-    });
+    const dir = new THREE.Vector3(Math.cos(angle) * (0.4 + r1 * 0.8), 0.9 + r2 * 1.0, Math.sin(angle) * (0.4 + r1 * 0.8)).normalize();
+    specs.push({ id: GLOW_COUNT + i, delay: r3 * 0.22, dir, speed: 0.8 + r2 * 0.7, size: 0.02 + r1 * 0.02 });
   }
   return specs;
 }
@@ -61,10 +51,10 @@ function buildParticles(): ParticleSpec[] {
 const PARTICLES = buildParticles();
 
 /**
- * The rupture burst: a soft haze bloom, two crossed light-shaft planes (not
- * a ring), a dozen warm glow specks, and a handful of tumbling debris flecks
- * — all deterministic and short-lived. Cinematic product-explosion scale,
- * not a fantasy-spell particle field.
+ * The light intensifying into the card burst: a soft haze bloom, two crossed
+ * light-shaft planes (not a ring), warm glow specks, and fine light dust —
+ * all deterministic, short-lived, and additive. Nothing here implies the box
+ * breaking: no debris, no fragments, no tumbling geometry.
  */
 export function BurstVFX({
   burstRef,
@@ -73,9 +63,9 @@ export function BurstVFX({
   position,
 }: {
   burstRef: React.RefObject<number>;
-  /** The same shared elapsed-since-click clock every other C2 element animates from. */
+  /** The same shared elapsed-since-click clock every other intro element animates from. */
   tRef: React.RefObject<number>;
-  /** Fixed timestamp (seconds since click) the burst particles spawn at — RUPTURE_END. */
+  /** Fixed timestamp (seconds since click) the burst particles spawn at. */
   spawnAt: number;
   position: THREE.Vector3;
 }) {
@@ -112,24 +102,15 @@ export function BurstVFX({
         return;
       }
       group.visible = true;
-      const gravity = p.kind === "debris" ? 0.9 : 0.15;
-      group.position.set(
-        p.dir.x * p.speed * lt,
-        p.dir.y * p.speed * lt - 0.5 * gravity * lt * lt,
-        p.dir.z * p.speed * lt,
-      );
+      group.position.set(p.dir.x * p.speed * lt, p.dir.y * p.speed * lt - 0.075 * lt * lt, p.dir.z * p.speed * lt);
       const fadeIn = clamp01(lt / 0.1);
       const fadeOut = 1 - clamp01((lt - LIFETIME * 0.55) / (LIFETIME * 0.45));
       const life = Math.min(fadeIn, fadeOut);
       group.scale.setScalar(p.size * (0.6 + life * 0.4));
-      if (p.kind === "debris") {
-        group.rotation.set(p.spin.x * lt, p.spin.y * lt, p.spin.z * lt);
-      } else {
-        group.quaternion.copy(camera.quaternion);
-      }
+      group.quaternion.copy(camera.quaternion);
       const mesh = group.children[0] as THREE.Mesh;
-      const mat = mesh.material as THREE.MeshBasicMaterial | THREE.MeshStandardMaterial;
-      mat.opacity = life * (p.kind === "glow" ? 0.9 : 1);
+      const mat = mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = life * 0.85;
     });
   });
 
@@ -156,17 +137,10 @@ export function BurstVFX({
           }}
           visible={false}
         >
-          {p.kind === "glow" ? (
-            <mesh>
-              <planeGeometry args={[1, 1]} />
-              <meshBasicMaterial map={glowTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
-            </mesh>
-          ) : (
-            <mesh>
-              <planeGeometry args={[1, 1.4]} />
-              <meshStandardMaterial color="#2c2823" roughness={0.9} transparent opacity={0} />
-            </mesh>
-          )}
+          <mesh>
+            <planeGeometry args={[1, 1]} />
+            <meshBasicMaterial map={glowTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
+          </mesh>
         </group>
       ))}
     </group>

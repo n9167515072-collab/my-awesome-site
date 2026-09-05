@@ -1,6 +1,7 @@
 import type { StaticImageData } from "next/image";
 
 import aliceBoxFrontImg from "../../../assets/product/alice/box-front-texture.png";
+import aliceBoxSideImg from "../../../assets/product/alice/box-side-texture.png";
 import aliceBackImg from "../../../assets/product/alice/back.png";
 import aliceCard1Img from "../../../assets/product/alice/card-01.png";
 import aliceCard2Img from "../../../assets/product/alice/card-02.png";
@@ -19,6 +20,17 @@ import vitrajiCard3Img from "../../../assets/product/vitraji/card-03.png";
  * isolated product renders (card fronts, card backs, the Alice box) — not
  * AI-generated tabletop/macro comps. Do not substitute prototype crops back
  * in here; see CLAUDE.md / DESIGN.md for why that distinction matters.
+ *
+ * box-side-texture.png (2026-09-05) is the box's real LEFT face, extracted
+ * the same way as the front: 4 manually-identified corners in box.png's
+ * source photo, ImageMagick -distort Perspective against those corners,
+ * cropped to the flat quad, background trimmed. No pixels invented. A top
+ * face IS technically visible in the source photo but only as an extremely
+ * foreshortened sliver (viewed almost edge-on) — rectifying it would mean
+ * stretching ~20px of source into a full face texture, i.e. an unusably
+ * blurry result, so the top stays a neutral placeholder rather than
+ * pretending that's a real texture. Right/bottom/back are never visible in
+ * any source photo at all.
  *
  * Known gaps, not filled in by invention:
  * - No Vitraji box asset is wired in here. The supplied zip's README
@@ -78,14 +90,14 @@ export const ALICE_DECK: DeckConfig = {
     // shadow, no invented pixels. See git history for box.png (the original
     // 3/4-angle photo) if the correction ever needs redoing.
     faces: [
-      { kind: "placeholder", color: ALICE_CARDBOARD }, // right
-      { kind: "placeholder", color: ALICE_CARDBOARD }, // left
-      { kind: "placeholder", color: ALICE_CARDBOARD }, // top
+      { kind: "placeholder", color: ALICE_CARDBOARD }, // right — never visible in the source photo
+      { kind: "real", texture: aliceBoxSideImg }, // left — extracted from box.png, see provenance note above
+      { kind: "placeholder", color: ALICE_CARDBOARD }, // top — visible but too foreshortened to rectify usably
       { kind: "placeholder", color: ALICE_CARDBOARD }, // bottom
       { kind: "real", texture: aliceBoxFrontImg }, // front
       { kind: "placeholder", color: ALICE_CARDBOARD }, // back
     ],
-    placeholderFaces: ["right", "left", "top", "bottom", "back"],
+    placeholderFaces: ["right", "top", "bottom", "back"],
     size: { w: 0.76, h: 1.35, d: 0.42 }, // w:h matches box-front-texture.png's measured 0.5636 ratio; depth is an unmeasured guess
   },
 };
