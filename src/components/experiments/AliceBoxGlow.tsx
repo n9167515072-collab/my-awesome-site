@@ -43,7 +43,11 @@ export function AliceBoxGlow({ deck, interactive = true, pressureRef, burstRef, 
   );
 }
 
-/** Soft additive glow at the closed top seam and corners — light leaking out, never a ring or portal shape. */
+/**
+ * A narrow bright line along the closed top seam — never a round glow or
+ * corner blobs, which read as a halo. It starts as a thin bright thread and
+ * thickens/brightens as the internal light intensifies toward the burst.
+ */
 function SeamGlow({
   seamY,
   size,
@@ -56,50 +60,22 @@ function SeamGlow({
   burstRef: React.RefObject<number>;
 }) {
   const stripRef = useRef<THREE.Mesh>(null);
-  const cornerRefs = useRef<(THREE.Mesh | null)[]>([]);
   const texture = useMemo(() => makeGlowTexture(), []);
-
-  const corners: [number, number][] = [
-    [-size.w / 2 + 0.08, size.d / 2 - 0.05],
-    [size.w / 2 - 0.08, size.d / 2 - 0.05],
-    [-size.w / 2 + 0.08, -size.d / 2 + 0.05],
-    [size.w / 2 - 0.08, -size.d / 2 + 0.05],
-  ];
 
   useFrame(({ camera }) => {
     const level = Math.min(1, pressureRef.current + burstRef.current * 0.6);
     if (stripRef.current) {
       stripRef.current.quaternion.copy(camera.quaternion);
-      stripRef.current.scale.setScalar(1 + burstRef.current * 0.4);
-      (stripRef.current.material as THREE.MeshBasicMaterial).opacity = level * 0.85;
+      // thin bright thread -> a thicker band as intensity rises
+      stripRef.current.scale.set(size.w * (0.78 + burstRef.current * 0.12), 0.05 + level * 0.16 + burstRef.current * 0.3, 1);
+      (stripRef.current.material as THREE.MeshBasicMaterial).opacity = level * 0.95;
     }
-    cornerRefs.current.forEach((m) => {
-      if (!m) return;
-      m.quaternion.copy(camera.quaternion);
-      m.scale.setScalar(1 + burstRef.current * 0.5);
-      (m.material as THREE.MeshBasicMaterial).opacity = level * 0.6;
-    });
   });
 
   return (
-    <>
-      <mesh ref={stripRef} position={[0, seamY, size.d / 2 + 0.02]} scale={[size.w * 0.85, 0.14, 1]}>
-        <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
-      </mesh>
-      {corners.map(([x, z], i) => (
-        <mesh
-          key={i}
-          ref={(el) => {
-            cornerRefs.current[i] = el;
-          }}
-          position={[x, seamY, z]}
-          scale={[0.16, 0.16, 1]}
-        >
-          <planeGeometry args={[1, 1]} />
-          <meshBasicMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
-        </mesh>
-      ))}
-    </>
+    <mesh ref={stripRef} position={[0, seamY, size.d / 2 + 0.02]} scale={[size.w * 0.78, 0.05, 1]}>
+      <planeGeometry args={[1, 1]} />
+      <meshBasicMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
+    </mesh>
   );
 }

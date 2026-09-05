@@ -51,10 +51,11 @@ function buildParticles(): ParticleSpec[] {
 const PARTICLES = buildParticles();
 
 /**
- * The light intensifying into the card burst: a soft haze bloom, two crossed
- * light-shaft planes (not a ring), warm glow specks, and fine light dust —
- * all deterministic, short-lived, and additive. Nothing here implies the box
- * breaking: no debris, no fragments, no tumbling geometry.
+ * The light intensifying into the card burst: a single narrow beam that
+ * rises upward from the seam (anchored at its base, not a symmetric blob),
+ * warm glow specks, and fine light dust — all deterministic, short-lived,
+ * and additive. Nothing here implies the box breaking: no debris, no
+ * fragments, no tumbling geometry, and no round halo/orb shape.
  */
 export function BurstVFX({
   burstRef,
@@ -70,27 +71,22 @@ export function BurstVFX({
   position: THREE.Vector3;
 }) {
   const glowTex = useMemo(() => makeGlowTexture(true), []);
-  const hazeRef = useRef<THREE.Mesh>(null);
-  const rayARef = useRef<THREE.Mesh>(null);
-  const rayBRef = useRef<THREE.Mesh>(null);
+  const beamRef = useRef<THREE.Mesh>(null);
   const particleRefs = useRef<(THREE.Group | null)[]>([]);
 
   useFrame(({ camera }) => {
     const burst = burstRef.current;
     const t = tRef.current;
 
-    if (hazeRef.current) {
-      hazeRef.current.quaternion.copy(camera.quaternion);
-      hazeRef.current.scale.setScalar(1.4 + burst * 1.8);
-      (hazeRef.current.material as THREE.MeshBasicMaterial).opacity = burst * 0.5;
-    }
-    if (rayARef.current) {
-      rayARef.current.scale.set(0.55 + burst * 0.35, 1.4 + burst * 1.6, 1);
-      (rayARef.current.material as THREE.MeshBasicMaterial).opacity = burst * 0.55;
-    }
-    if (rayBRef.current) {
-      rayBRef.current.scale.set(0.55 + burst * 0.35, 1.4 + burst * 1.6, 1);
-      (rayBRef.current.material as THREE.MeshBasicMaterial).opacity = burst * 0.4;
+    if (beamRef.current) {
+      const h = 0.6 + burst * 2.0;
+      const w = 0.32 + burst * 0.22;
+      beamRef.current.quaternion.copy(camera.quaternion);
+      beamRef.current.scale.set(w, h, 1);
+      // anchored at its base (local y=0, the seam) — it rises upward, it
+      // doesn't grow symmetrically from a floating center.
+      beamRef.current.position.y = h / 2;
+      (beamRef.current.material as THREE.MeshBasicMaterial).opacity = burst * 0.6;
     }
 
     PARTICLES.forEach((p, i) => {
@@ -116,15 +112,7 @@ export function BurstVFX({
 
   return (
     <group position={position.toArray()}>
-      <mesh ref={hazeRef}>
-        <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial map={glowTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
-      </mesh>
-      <mesh ref={rayARef}>
-        <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial map={glowTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
-      </mesh>
-      <mesh ref={rayBRef} rotation={[0, Math.PI / 2, 0]}>
+      <mesh ref={beamRef}>
         <planeGeometry args={[1, 1]} />
         <meshBasicMaterial map={glowTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
       </mesh>

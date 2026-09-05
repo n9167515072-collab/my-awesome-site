@@ -42,17 +42,34 @@ function seeded(i: number) {
 const CARDS_PER_GROUP = 12;
 const INTERACTIVE_PER_GROUP = 3;
 
-const STACK_CENTER: Record<World, THREE.Vector3> = {
-  alice: new THREE.Vector3(-1.6, -0.05, 0),
-  vitraji: new THREE.Vector3(1.6, -0.05, 0),
-};
+type StackCenters = Record<World, THREE.Vector3>;
 
-const BOX_POS = new THREE.Vector3(0, 0, 1.7);
+/**
+ * Landscape/desktop keeps the two decks side by side. Portrait stacks them
+ * vertically instead — at this scale, keeping them side-by-side on a phone
+ * would force both down to tiny, hard-to-read objects.
+ */
+function getStackCenters(isPortrait: boolean): StackCenters {
+  return isPortrait
+    ? { alice: new THREE.Vector3(0, 2.1, 0), vitraji: new THREE.Vector3(0, -2.1, 0) }
+    : { alice: new THREE.Vector3(-1.6, -0.05, 0), vitraji: new THREE.Vector3(1.6, -0.05, 0) };
+}
+
+// The organized catalogue reads as the composition's new focal point, not a
+// pair of small objects — every rest/fan offset authored in DeckStack3D
+// (for a "scale 1" deck) is scaled up uniformly around each STACK_CENTER.
+const CATALOGUE_SCALE = 2.8;
+
+// The box is the very first thing on screen — pulled closer to camera and
+// rendered larger so the opening doesn't read as a small object lost in a
+// big black void.
+const BOX_VISUAL_SCALE = 1.45;
+const BOX_POS = new THREE.Vector3(0, 0, 2.7);
 // The box never opens — cards spawn just inside its (intact) top and shoot
 // straight up through that region (LAUNCH_POS) before diverging.
-const BOX_TOP_Y = ALICE_DECK.box.size.h / 2;
+const BOX_TOP_Y = (ALICE_DECK.box.size.h / 2) * BOX_VISUAL_SCALE;
 const RELEASE_POS = BOX_POS.clone().add(new THREE.Vector3(0, BOX_TOP_Y - 0.15, 0));
-const LAUNCH_POS = BOX_POS.clone().add(new THREE.Vector3(0, BOX_TOP_Y + 0.75, 0));
+const LAUNCH_POS = BOX_POS.clone().add(new THREE.Vector3(0, BOX_TOP_Y + 0.9, 0));
 const LAUNCH_T = 0.32; // fraction of each card's travel window spent shooting straight up before diverging
 
 // Where the selected deck rushes toward the camera for the close-up, and
@@ -116,20 +133,20 @@ function buildFlightSpecs(): FlightSpec[] {
       const r3 = seeded(globalIndex * 3 + 3);
       const r4 = seeded(globalIndex * 5 + 1);
 
-      // golden-angle spiral cloud, biased so a few cards swing close to
-      // camera while most sit further back — an art-directed cloud, not a
-      // uniform random scatter.
+      // golden-angle spiral cloud, biased so a third of the cards swing very
+      // close to (and briefly fill) the camera view while the rest sit
+      // further back — an art-directed cloud, not a uniform random scatter.
       const golden = 2.399963;
       const angle = globalIndex * golden + side * 0.3;
       const radiusBand = 1.6 + (globalIndex % 5) * 0.42;
-      const closePass = globalIndex % 4 === 0;
+      const closePass = globalIndex % 3 === 0;
       const chaosPos = new THREE.Vector3(
         Math.cos(angle) * radiusBand * (0.85 + r1 * 0.5) + side * 0.4,
-        (r2 - 0.5) * 4.4,
-        closePass ? 2.4 + r3 * 1.6 : -2.6 - r3 * 2.4,
+        (r2 - 0.5) * 4.6,
+        closePass ? 2.8 + r3 * 2.0 : -2.6 - r3 * 2.4,
       );
       const chaosRot = new THREE.Euler((r1 - 0.5) * Math.PI * 1.4, (r2 - 0.5) * Math.PI * 1.6, (r3 - 0.5) * Math.PI);
-      const chaosScale = 0.82 + r4 * 0.36;
+      const chaosScale = closePass ? 1.15 + r4 * 0.75 : 0.72 + r4 * 0.28;
 
       const spawnStart = OPEN_END + (localIndex / CARDS_PER_GROUP) * T_RELEASE * 0.72 + r1 * 0.06;
       // cards passing close to camera mostly show their (recognizable)
@@ -165,6 +182,7 @@ function FlightCard({
   tRef,
   glowTexture,
   fanState,
+  stackCenters,
   closeupGroup,
   closeupGroupRef,
   onSelectDeck,
@@ -175,6 +193,7 @@ function FlightCard({
   tRef: React.RefObject<number>;
   glowTexture: THREE.Texture;
   fanState: Record<World, boolean>;
+  stackCenters: StackCenters;
   closeupGroup: World | null;
   closeupGroupRef: React.RefObject<World | null>;
   onSelectDeck: (g: World) => void;
@@ -183,13 +202,19 @@ function FlightCard({
   const groupRef = useRef<THREE.Group>(null);
   const trailRef = useRef<THREE.Mesh>(null);
 
-  const restPos = useMemo(() => STACK_CENTER[spec.group].clone().add(new THREE.Vector3(...spec.layout.rest.pos)), [spec]);
-  const fanPos = useMemo(() => STACK_CENTER[spec.group].clone().add(new THREE.Vector3(...spec.layout.fan.pos)), [spec]);
+  const restPos = useMemo(
+    () => stackCenters[spec.group].clone().add(new THREE.Vector3(...spec.layout.rest.pos).multiplyScalar(CATALOGUE_SCALE)),
+    [spec, stackCenters],
+  );
+  const fanPos = useMemo(
+    () => stackCenters[spec.group].clone().add(new THREE.Vector3(...spec.layout.fan.pos).multiplyScalar(CATALOGUE_SCALE)),
+    [spec, stackCenters],
+  );
   const closeupPos = useMemo(
     () => CLOSEUP_CENTER.clone().add(new THREE.Vector3(spec.layout.rest.pos[0] * 0.4, spec.layout.rest.pos[1] * 0.4, spec.layout.rest.pos[2] * 0.4)),
     [spec],
   );
-  const recedePos = useMemo(() => STACK_CENTER[spec.group].clone().add(new THREE.Vector3(0, 0, -3.4)), [spec]);
+  const recedePos = useMemo(() => stackCenters[spec.group].clone().add(new THREE.Vector3(0, 0, -3.4)), [spec, stackCenters]);
   const restRotZ = spec.layout.rest.rot[2];
   const fanRotZ = spec.layout.fan.rot[2];
 
@@ -259,10 +284,10 @@ function FlightCard({
         lerp(spec.chaosPos.z, restPos.z, orgT),
       );
       group.rotation.set(lerp(spec.chaosRot.x, 0, orgT), lerp(spec.chaosRot.y, 0, orgT), lerp(spec.chaosRot.z, restRotZ, orgT));
-      group.scale.setScalar(lerp(spec.chaosScale, 1, orgT));
+      group.scale.setScalar(lerp(spec.chaosScale, CATALOGUE_SCALE, orgT));
       settledPos.current.copy(group.position);
       settledRotZ.current = lerp(spec.chaosRot.z, restRotZ, orgT);
-      settledScale.current = 1;
+      settledScale.current = CATALOGUE_SCALE;
     } else {
       if (trailRef.current) trailRef.current.visible = false;
       const activeCloseup = closeupGroupRef.current;
@@ -281,7 +306,7 @@ function FlightCard({
         const fanned = fanState[spec.group];
         target = fanned ? fanPos : restPos;
         targetRotZ = fanned ? fanRotZ : restRotZ;
-        targetScale = 1;
+        targetScale = CATALOGUE_SCALE;
       }
       settledPos.current.lerp(target, 0.12);
       settledRotZ.current = lerp(settledRotZ.current, targetRotZ, 0.12);
@@ -317,8 +342,7 @@ function FlightCard({
   );
 }
 
-function StackHitArea({ group, onFan }: { group: World; onFan: () => void }) {
-  const pos = STACK_CENTER[group];
+function StackHitArea({ pos, onFan }: { pos: THREE.Vector3; onFan: () => void }) {
   return (
     <mesh
       position={[pos.x, pos.y, pos.z + 0.06]}
@@ -328,14 +352,13 @@ function StackHitArea({ group, onFan }: { group: World; onFan: () => void }) {
         onFan();
       }}
     >
-      <planeGeometry args={[1.3, 1.7]} />
+      <planeGeometry args={[2.3, 3.5]} />
     </mesh>
   );
 }
 
 /** A larger hit-area behind the fanned spread — clicking the deck (not a card) opens the close-up. */
-function DeckAreaHitArea({ group, onSelect }: { group: World; onSelect: () => void }) {
-  const pos = STACK_CENTER[group];
+function DeckAreaHitArea({ pos, size, onSelect }: { pos: THREE.Vector3; size: [number, number]; onSelect: () => void }) {
   return (
     <mesh
       position={[pos.x, pos.y, pos.z - 0.3]}
@@ -345,7 +368,7 @@ function DeckAreaHitArea({ group, onSelect }: { group: World; onSelect: () => vo
         onSelect();
       }}
     >
-      <planeGeometry args={[3, 2.4]} />
+      <planeGeometry args={size} />
     </mesh>
   );
 }
@@ -357,6 +380,8 @@ function Scene({
   pressureRef,
   burstRef,
   fanState,
+  stackCenters,
+  isPortrait,
   closeupGroup,
   closeupGroupRef,
   onToggleFan,
@@ -368,6 +393,8 @@ function Scene({
   pressureRef: React.RefObject<number>;
   burstRef: React.RefObject<number>;
   fanState: Record<World, boolean>;
+  stackCenters: StackCenters;
+  isPortrait: boolean;
   closeupGroup: World | null;
   closeupGroupRef: React.RefObject<World | null>;
   onToggleFan: (g: World) => void;
@@ -377,6 +404,10 @@ function Scene({
   const ambientRef = useRef<THREE.AmbientLight>(null);
   const keyLightRef = useRef<THREE.DirectionalLight>(null);
   const glowTexture = useMemo(() => makeGlowTexture(true), []);
+  // Fan spreads horizontally regardless of stacking direction — sized so a
+  // portrait deck's own fan never collides with its (vertically offset)
+  // neighbor, and a landscape deck's fan never reaches the other deck's.
+  const deckAreaSize: [number, number] = isPortrait ? [4.6, 3.4] : [3.0, 4.2];
 
   useFrame((_state, delta) => {
     if (phaseRef.current !== "closed") {
@@ -392,9 +423,8 @@ function Scene({
 
     if (boxWrapperRef.current) {
       const fadeT = clamp01((t - OPEN_END) / 0.5);
-      const scale = 1 - fadeT;
-      boxWrapperRef.current.scale.setScalar(scale);
-      boxWrapperRef.current.visible = scale > 0.01;
+      boxWrapperRef.current.scale.setScalar(BOX_VISUAL_SCALE * (1 - fadeT));
+      boxWrapperRef.current.visible = fadeT < 0.995;
     }
   });
 
@@ -423,16 +453,25 @@ function Scene({
           tRef={tRef}
           glowTexture={glowTexture}
           fanState={fanState}
+          stackCenters={stackCenters}
           closeupGroup={closeupGroup}
           closeupGroupRef={closeupGroupRef}
           onSelectDeck={onSelectDeck}
         />
       ))}
 
-      {phase === "catalogue" && closeupGroup === null && !fanState.alice && <StackHitArea group="alice" onFan={() => onToggleFan("alice")} />}
-      {phase === "catalogue" && closeupGroup === null && !fanState.vitraji && <StackHitArea group="vitraji" onFan={() => onToggleFan("vitraji")} />}
-      {phase === "catalogue" && closeupGroup === null && fanState.alice && <DeckAreaHitArea group="alice" onSelect={() => onSelectDeck("alice")} />}
-      {phase === "catalogue" && closeupGroup === null && fanState.vitraji && <DeckAreaHitArea group="vitraji" onSelect={() => onSelectDeck("vitraji")} />}
+      {phase === "catalogue" && closeupGroup === null && !fanState.alice && (
+        <StackHitArea pos={stackCenters.alice} onFan={() => onToggleFan("alice")} />
+      )}
+      {phase === "catalogue" && closeupGroup === null && !fanState.vitraji && (
+        <StackHitArea pos={stackCenters.vitraji} onFan={() => onToggleFan("vitraji")} />
+      )}
+      {phase === "catalogue" && closeupGroup === null && fanState.alice && (
+        <DeckAreaHitArea pos={stackCenters.alice} size={deckAreaSize} onSelect={() => onSelectDeck("alice")} />
+      )}
+      {phase === "catalogue" && closeupGroup === null && fanState.vitraji && (
+        <DeckAreaHitArea pos={stackCenters.vitraji} size={deckAreaSize} onSelect={() => onSelectDeck("vitraji")} />
+      )}
     </>
   );
 }
@@ -447,6 +486,18 @@ export function ExperimentC2Transform() {
   const [closeupGroup, setCloseupGroup] = useState<World | null>(null);
   const closeupGroupRef = useRef<World | null>(null);
   const [closeupVisible, setCloseupVisible] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(false);
+
+  useEffect(() => {
+    function check() {
+      setIsPortrait(window.innerWidth < window.innerHeight);
+    }
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  const stackCenters = useMemo(() => getStackCenters(isPortrait), [isPortrait]);
 
   function goPhase(next: Phase) {
     phaseRef.current = next;
@@ -485,6 +536,8 @@ export function ExperimentC2Transform() {
           pressureRef={pressureRef}
           burstRef={burstRef}
           fanState={fanState}
+          stackCenters={stackCenters}
+          isPortrait={isPortrait}
           closeupGroup={closeupGroup}
           closeupGroupRef={closeupGroupRef}
           onToggleFan={toggleFan}
@@ -505,10 +558,18 @@ export function ExperimentC2Transform() {
 
       {phase === "catalogue" && !closeupGroup && (
         <>
-          <p className="pointer-events-none absolute bottom-10 left-[28%] z-20 -translate-x-1/2 text-[11px] font-medium tracking-[0.35em] text-white/70">
+          <p
+            className={`pointer-events-none absolute z-20 text-[11px] font-medium tracking-[0.35em] text-white/70 ${
+              isPortrait ? "left-1/2 top-[49%] -translate-x-1/2" : "bottom-10 left-[28%] -translate-x-1/2"
+            }`}
+          >
             АЛИСА
           </p>
-          <p className="pointer-events-none absolute bottom-10 left-[72%] z-20 -translate-x-1/2 text-[11px] font-medium tracking-[0.35em] text-white/70">
+          <p
+            className={`pointer-events-none absolute z-20 text-[11px] font-medium tracking-[0.35em] text-white/70 ${
+              isPortrait ? "left-1/2 top-[87%] -translate-x-1/2" : "bottom-10 left-[72%] -translate-x-1/2"
+            }`}
+          >
             ВИТРАЖИ
           </p>
         </>
@@ -536,12 +597,12 @@ export function ExperimentC2Transform() {
 }
 
 /**
- * The two decks sit at a fixed world x-offset (±1.6). Three's `fov` prop is
- * VERTICAL, so on a narrow/tall (portrait) viewport the derived horizontal
- * FOV shrinks well below what's needed to keep both decks in frame — on a
- * phone they'd render entirely off-screen. This widens the vertical fov on
- * portrait aspects just enough to guarantee a minimum horizontal FOV,
- * leaving desktop/landscape untouched.
+ * The two decks sit at a fixed world offset from center. Three's `fov` prop
+ * is VERTICAL, so on a narrow/tall (portrait) viewport the derived
+ * horizontal FOV shrinks well below what's needed to keep a fanned deck's
+ * spread in frame — on a phone it would render partly off-screen. This
+ * widens the vertical fov on portrait aspects just enough to guarantee a
+ * minimum horizontal FOV, leaving desktop/landscape untouched.
  */
 function ResponsiveCamera() {
   const size = useThree((s) => s.size);
@@ -554,8 +615,8 @@ function ResponsiveCamera() {
     const desktopVFovDeg = 45;
     let vFovDeg = desktopVFovDeg;
     if (aspect < 1) {
-      // 46° keeps both decks' FANNED spread (the widest state, cards reach
-      // roughly ±2.0 world units from center) inside frame on a phone.
+      // 46° keeps a single fanned deck's spread (cards reach roughly ±2.0
+      // world units from its own center) inside frame on a phone.
       const minHFovRad = (46 * Math.PI) / 180;
       const vFovRad = 2 * Math.atan(Math.tan(minHFovRad / 2) / aspect);
       vFovDeg = Math.max(desktopVFovDeg, (vFovRad * 180) / Math.PI);
