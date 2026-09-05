@@ -39,7 +39,9 @@ function seeded(i: number) {
   return x - Math.floor(x);
 }
 
-const CARDS_PER_GROUP = 12;
+// The cloud is the hero now, not the box VFX — more cards than a believable
+// "closed stack" needs, so the eruption reads as abundant.
+const CARDS_PER_GROUP = 24;
 const INTERACTIVE_PER_GROUP = 3;
 
 type StackCenters = Record<World, THREE.Vector3>;
@@ -79,17 +81,17 @@ const CLOSEUP_SCALE = 2.5;
 const RECEDE_SCALE = 0.25;
 
 // Phase durations (seconds since the click). Only Alice's box is involved —
-// the intro deliberately starts from one object, not two. The box stays
-// intact throughout: CALM -> INTERNAL LIGHT (seam glow builds) -> INTENSITY
-// (light peaks, particles fire) -> CARD BURST (cards shoot out of the top).
-const CALM_END = 0.5;
-const LIGHT_END = 1.3;
-const INTENSITY_END = 1.9;
+// the intro deliberately starts from one object, not two. The box is just a
+// believable origin now, not the main event: CALM -> a brief activation cue
+// -> the card cloud takes over almost immediately.
+const CALM_END = 0.15;
+const LIGHT_END = 0.35;
+const INTENSITY_END = 0.5;
 const OPEN_END = INTENSITY_END;
 
-const T_RELEASE = 1.7;
-const T_CHAOS_HOLD = 1.3;
-const T_ORGANIZE = 1.7;
+const T_RELEASE = 1.0;
+const T_CHAOS_HOLD = 0.7;
+const T_ORGANIZE = 1.1;
 const RELEASE_END = OPEN_END + T_RELEASE;
 const CHAOS_END = RELEASE_END + T_CHAOS_HOLD;
 const ORGANIZE_END = CHAOS_END + T_ORGANIZE;
@@ -115,8 +117,14 @@ type FlightSpec = {
   chaosPos: THREE.Vector3;
   chaosRot: THREE.Euler;
   chaosScale: number;
-  showsBackInChaos: boolean;
-  revealAt: number;
+  /**
+   * Fixed for the card's entire life — chaos flight AND the organized
+   * state. Never toggled at runtime: the same face the viewer glimpses
+   * mid-flight is the face it settles on, so nothing appears to swap
+   * identity once it lands. Interactive (visible top-of-stack) cards are
+   * always fronts, since they need to be recognizable once organized.
+   */
+  showsBack: boolean;
   /** First few cards out of the box get a brief accompanying glow trail. */
   hasLaunchGlow: boolean;
 };
@@ -149,10 +157,14 @@ function buildFlightSpecs(): FlightSpec[] {
       const chaosScale = closePass ? 1.15 + r4 * 0.75 : 0.72 + r4 * 0.28;
 
       const spawnStart = OPEN_END + (localIndex / CARDS_PER_GROUP) * T_RELEASE * 0.72 + r1 * 0.06;
-      // cards passing close to camera mostly show their (recognizable)
-      // front; the deep background cloud is mostly card backs.
-      const showsBackInChaos = closePass ? r2 < 0.25 : r2 < 0.72;
-      const revealAt = CHAOS_END + (localIndex / CARDS_PER_GROUP) * T_ORGANIZE * 0.5 + r3 * 0.15;
+      // Stable for life: interactive (top-of-stack) cards are always
+      // fronts, since the same card glimpsed in flight has to be
+      // recognizable once it's sitting on top of the organized deck. Bulk
+      // (hidden-in-the-pile) cards lean heavily toward backs, both to hide
+      // the 3-artwork repetition across ~45 cards and because that's all
+      // that's ever visible of them once organized — so whichever face they
+      // launch with is already their final one.
+      const showsBack = cardLayout.interactiveIndex === null && r2 < 0.78;
 
       specs.push({
         id: `${group}-${localIndex}`,
@@ -162,8 +174,7 @@ function buildFlightSpecs(): FlightSpec[] {
         chaosPos,
         chaosRot,
         chaosScale,
-        showsBackInChaos,
-        revealAt,
+        showsBack,
         hasLaunchGlow: localIndex < 3,
       });
     });
@@ -222,18 +233,9 @@ function FlightCard({
   const settledRotZ = useRef(restRotZ);
   const settledScale = useRef(1);
 
-  const [flippedState, setFlippedState] = useState(spec.showsBackInChaos);
-  const flippedRef = useRef(spec.showsBackInChaos);
-
   useFrame((state) => {
     const t = tRef.current;
     const group = groupRef.current;
-
-    const shouldBeFlipped = t < spec.revealAt && spec.showsBackInChaos;
-    if (shouldBeFlipped !== flippedRef.current) {
-      flippedRef.current = shouldBeFlipped;
-      setFlippedState(shouldBeFlipped);
-    }
 
     if (!group) return;
 
@@ -331,7 +333,7 @@ function FlightCard({
         frontTexture={deck.cardFronts[spec.layout.frontIndex]}
         backTexture={deck.cardBack}
         tint={deck.tint}
-        flipped={flippedState}
+        flipped={spec.showsBack}
         interactive={interactive}
         onClick={() => {
           if (phaseRef.current !== "catalogue" || closeupGroupRef.current !== null || !fanState[spec.group]) return;

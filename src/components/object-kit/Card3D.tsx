@@ -8,6 +8,21 @@ import type { StaticImageData } from "next/image";
 
 import { createRoundedCardGeometry } from "@/lib/three/card-geometry";
 
+// Shared across every Card3D instance with the same dimensions — with scenes
+// now rendering dozens of cards at once, building one ExtrudeGeometry per
+// instance (they're all geometrically identical in practice) wastes CPU and
+// GPU buffer memory for no visual benefit.
+const geometryCache = new Map<string, THREE.BufferGeometry>();
+function getSharedCardGeometry(width: number, height: number, thickness: number, radius: number) {
+  const key = `${width}|${height}|${thickness}|${radius}`;
+  let geo = geometryCache.get(key);
+  if (!geo) {
+    geo = createRoundedCardGeometry(width, height, thickness, radius);
+    geometryCache.set(key, geo);
+  }
+  return geo;
+}
+
 export type Card3DProps = {
   frontTexture: StaticImageData;
   backTexture: StaticImageData;
@@ -51,10 +66,7 @@ export function Card3D({
   const frontMap = useTexture(frontTexture.src);
   const backMap = useTexture(backTexture.src);
 
-  const geometry = useMemo(
-    () => createRoundedCardGeometry(width, height, thickness, radius),
-    [width, height, thickness, radius],
-  );
+  const geometry = useMemo(() => getSharedCardGeometry(width, height, thickness, radius), [width, height, thickness, radius]);
 
   const materials = useMemo(() => {
     // Near-black, restrained (not glossy plastic) — integrates with both decks' artwork.
