@@ -40,10 +40,13 @@ const STACK_CENTER: Record<World, THREE.Vector3> = {
 };
 
 const BOX_POS = new THREE.Vector3(0, 0, 1.7);
+// The activation zone: just above the (closed, never-opening) box — cards
+// spawn and fly from here, not from the box's own center.
+const RELEASE_POS = new THREE.Vector3(0, 0.95, 1.7);
 
 // Phase durations (seconds since the click). Only Alice's box opens — the
 // intro deliberately starts from one object, not two.
-const T_OPEN = 0.85;
+const T_OPEN = 0.85; // light-build duration, above the still-closed box
 const T_RELEASE = 1.7;
 const T_CHAOS_HOLD = 1.3;
 const T_ORGANIZE = 1.7;
@@ -51,6 +54,13 @@ const OPEN_END = T_OPEN;
 const RELEASE_END = OPEN_END + T_RELEASE;
 const CHAOS_END = RELEASE_END + T_CHAOS_HOLD;
 const ORGANIZE_END = CHAOS_END + T_ORGANIZE;
+
+/** Glow ramp: builds through the light-build window, holds through the full release, then fades. */
+function glowIntensity(t: number) {
+  if (t < T_OPEN) return easeOutCubic(clamp01(t / T_OPEN));
+  if (t < RELEASE_END) return 1;
+  return 1 - clamp01((t - RELEASE_END) / 0.45);
+}
 
 type FlightSpec = {
   id: string;
@@ -162,7 +172,7 @@ function FlightCard({
 
     if (t < spec.spawnStart) {
       group.visible = false;
-      group.position.copy(BOX_POS);
+      group.position.copy(RELEASE_POS);
       group.scale.setScalar(0.001);
       return;
     }
@@ -174,9 +184,9 @@ function FlightCard({
     if (t < CHAOS_END) {
       const eased = easeOutCubic(travelT);
       group.position.set(
-        lerp(BOX_POS.x, spec.chaosPos.x, eased),
-        lerp(BOX_POS.y, spec.chaosPos.y, eased),
-        lerp(BOX_POS.z, spec.chaosPos.z, eased),
+        lerp(RELEASE_POS.x, spec.chaosPos.x, eased),
+        lerp(RELEASE_POS.y, spec.chaosPos.y, eased),
+        lerp(RELEASE_POS.z, spec.chaosPos.z, eased),
       );
       group.rotation.set(lerp(0, spec.chaosRot.x, eased), lerp(0, spec.chaosRot.y, eased), lerp(0, spec.chaosRot.z, eased));
       group.scale.setScalar(popScale * lerp(1, spec.chaosScale, eased));
@@ -226,6 +236,70 @@ function FlightCard({
   );
 }
 
+/** Soft radial gradient (no ring/hole) — reads as a light bloom, not a portal. */
+function useSoftGlowTexture() {
+  return useMemo(() => {
+    const size = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+      gradient.addColorStop(0, "rgba(255,241,212,0.95)");
+      gradient.addColorStop(0.4, "rgba(255,226,172,0.4)");
+      gradient.addColorStop(1, "rgba(255,226,172,0)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
+  }, []);
+}
+
+/**
+ * The card-release beat, without any "magic portal" geometry: a real warm
+ * point light plus two soft additive-blended glow billboards (no ring,
+ * no particles), driven by a single 0..1 ref. Premium product-film bloom,
+ * not fantasy VFX.
+ */
+function ActivationGlow({ intensityRef, position }: { intensityRef: React.RefObject<number>; position: THREE.Vector3 }) {
+  const lightRef = useRef<THREE.PointLight>(null);
+  const outerRef = useRef<THREE.Mesh>(null);
+  const coreRef = useRef<THREE.Mesh>(null);
+  const texture = useSoftGlowTexture();
+
+  useFrame(({ camera }) => {
+    const v = intensityRef.current;
+    if (lightRef.current) lightRef.current.intensity = v * 5.5;
+    if (outerRef.current) {
+      outerRef.current.quaternion.copy(camera.quaternion);
+      outerRef.current.scale.setScalar(1.1 + v * 0.5);
+      (outerRef.current.material as THREE.MeshBasicMaterial).opacity = v * 0.55;
+    }
+    if (coreRef.current) {
+      coreRef.current.quaternion.copy(camera.quaternion);
+      coreRef.current.scale.setScalar(0.5 + v * 0.25);
+      (coreRef.current.material as THREE.MeshBasicMaterial).opacity = v * 0.85;
+    }
+  });
+
+  return (
+    <group position={position.toArray()}>
+      <pointLight ref={lightRef} color="#ffe9c2" intensity={0} distance={5} decay={2} />
+      <mesh ref={outerRef}>
+        <planeGeometry args={[1.6, 1.6]} />
+        <meshBasicMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
+      </mesh>
+      <mesh ref={coreRef} position={[0, 0, 0.01]}>
+        <planeGeometry args={[0.9, 0.9]} />
+        <meshBasicMaterial map={texture} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} />
+      </mesh>
+    </group>
+  );
+}
+
 function StackHitArea({ group, onFan }: { group: World; onFan: () => void }) {
   const pos = STACK_CENTER[group];
   return (
@@ -246,7 +320,7 @@ function Scene({
   phase,
   phaseRef,
   tRef,
-  openProgressRef,
+  glowRef,
   fanState,
   flipState,
   onToggleFan,
@@ -255,7 +329,7 @@ function Scene({
   phase: Phase;
   phaseRef: React.RefObject<Phase>;
   tRef: React.RefObject<number>;
-  openProgressRef: React.RefObject<number>;
+  glowRef: React.RefObject<number>;
   fanState: Record<World, boolean>;
   flipState: Set<string>;
   onToggleFan: (g: World) => void;
@@ -268,7 +342,7 @@ function Scene({
       tRef.current += delta;
     }
     const t = tRef.current;
-    openProgressRef.current = easeOutCubic(clamp01(t / T_OPEN));
+    glowRef.current = glowIntensity(t);
 
     if (boxWrapperRef.current) {
       const fadeT = clamp01((t - OPEN_END) / (T_OPEN * 0.6));
@@ -285,9 +359,14 @@ function Scene({
       <directionalLight position={[2.5, 3, 4]} intensity={1.1} />
       <directionalLight position={[-3, -1, -2]} intensity={0.35} />
 
+      {/* The box stays one intact, closed object throughout — it never hinges
+          or splits open. It shrinks away as a whole once the release zone
+          above it has taken over as the visual focus. */}
       <group ref={boxWrapperRef} position={BOX_POS.toArray()}>
-        <TarotBox3D deck={ALICE_DECK} openProgress={openProgressRef} interactive={phase === "closed"} />
+        <TarotBox3D deck={ALICE_DECK} interactive={phase === "closed"} />
       </group>
+
+      <ActivationGlow intensityRef={glowRef} position={RELEASE_POS} />
 
       {FLIGHT_SPECS.map((spec) => (
         <FlightCard
@@ -312,7 +391,7 @@ export function ExperimentC2Transform() {
   const [phase, setPhase] = useState<Phase>("closed");
   const phaseRef = useRef<Phase>("closed");
   const tRef = useRef(0);
-  const openProgressRef = useRef(0);
+  const glowRef = useRef(0);
   const [fanState, setFanState] = useState<Record<World, boolean>>({ alice: false, vitraji: false });
   const [flipState, setFlipState] = useState<Set<string>>(new Set());
 
@@ -346,7 +425,7 @@ export function ExperimentC2Transform() {
           phase={phase}
           phaseRef={phaseRef}
           tRef={tRef}
-          openProgressRef={openProgressRef}
+          glowRef={glowRef}
           fanState={fanState}
           flipState={flipState}
           onToggleFan={toggleFan}

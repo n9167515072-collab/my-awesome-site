@@ -38,7 +38,10 @@ export function Card3D({
   // 0.75:1.24 matches the real card photos' 898:1488 (0.6035) aspect ratio.
   width = 0.75,
   height = 1.24,
-  thickness = 0.028,
+  // Premium cardstock, not a toy slab — thin enough to read almost flat
+  // front-on; the edge only registers at oblique angles, close passes, or
+  // mid-flip.
+  thickness = 0.010,
   radius = 0.055,
   interactive = true,
   onClick,
@@ -54,7 +57,8 @@ export function Card3D({
   );
 
   const materials = useMemo(() => {
-    const edge = new THREE.MeshStandardMaterial({ color: "#efe6d3", roughness: 0.65, metalness: 0.02 });
+    // Near-black, restrained (not glossy plastic) — integrates with both decks' artwork.
+    const edge = new THREE.MeshStandardMaterial({ color: "#161616", roughness: 0.6, metalness: 0.04 });
     const back = new THREE.MeshStandardMaterial({
       map: backMap,
       color: tint ?? "#ffffff",

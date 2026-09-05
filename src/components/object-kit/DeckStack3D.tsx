@@ -20,14 +20,16 @@ export function buildStackLayout(cardCount: number, interactiveCount: number): C
   const mid = (interactiveCount - 1) / 2;
   return Array.from({ length: cardCount }, (_, i) => {
     const interactiveIndex = i < interactiveCount ? i : null;
+    // Z gaps tuned for Card3D's thin (0.010) cardstock thickness — tight enough
+    // to read as a pressed pile rather than a fanned-open deck.
     const rest: CardLayout["rest"] =
       interactiveIndex !== null
         ? {
-            pos: [(interactiveIndex - mid) * 0.02, (interactiveIndex - mid) * -0.015, interactiveIndex * 0.006],
+            pos: [(interactiveIndex - mid) * 0.02, (interactiveIndex - mid) * -0.015, interactiveIndex * 0.0025],
             rot: [0, 0, (interactiveIndex - mid) * 0.05],
           }
         : {
-            pos: [-0.06, -0.02, -0.012 - (i - interactiveCount) * 0.006],
+            pos: [-0.06, -0.02, -0.005 - (i - interactiveCount) * 0.0025],
             rot: [0, 0, 0.14],
           };
     const fan: CardLayout["fan"] =
