@@ -1,34 +1,37 @@
 import type { StaticImageData } from "next/image";
 
-import aliceBoxImg from "../../../assets/experiments/cards/alice-box.png";
-import aliceCard1Img from "../../../assets/experiments/cards/alice-card-1.png";
-import aliceCard2Img from "../../../assets/experiments/cards/alice-card-2.png";
-import aliceCard3Img from "../../../assets/experiments/cards/alice-card-3.png";
-import aliceBackImg from "../../../assets/experiments/cards/alice-deck-back.png";
-import vitrajiCard1Img from "../../../assets/experiments/cards/vitraji-card-1.png";
-import vitrajiCard2Img from "../../../assets/experiments/cards/vitraji-card-2.png";
-import vitrajiCard3Img from "../../../assets/experiments/cards/vitraji-card-3.png";
-import vitrajiBackImg from "../../../assets/experiments/cards/vitraji-deck-back.png";
+import aliceBoxImg from "../../../assets/product/alice/box.png";
+import aliceBackImg from "../../../assets/product/alice/back.png";
+import aliceCard1Img from "../../../assets/product/alice/card-01.png";
+import aliceCard2Img from "../../../assets/product/alice/card-02.png";
+import aliceCard3Img from "../../../assets/product/alice/card-03.png";
+import vitrajiBackImg from "../../../assets/product/vitraji/back.png";
+import vitrajiCard1Img from "../../../assets/product/vitraji/card-01.png";
+import vitrajiCard2Img from "../../../assets/product/vitraji/card-02.png";
+import vitrajiCard3Img from "../../../assets/product/vitraji/card-03.png";
 
 /**
  * ASSET PROVENANCE — read before touching this file.
  *
- * None of the images below are photographs of the physical LunaLum decks.
- * They are crops (made with sharp, see assets/experiments/cards/README-less
- * history in git) taken from assets/prototype/01-alice-tabletop-prototype.png
- * and 02-vitraji-tabletop-prototype.png — the AI-generated "art-direction
- * comp" tabletop scenes already flagged as non-production-truth in
- * DESIGN.md's asset fidelity notice.
+ * These are the recovered original LunaLum product assets, unpacked into
+ * assets/product/ from a zip the user supplied (2026-09-05), replacing the
+ * assets/prototype/-derived crops this file used before. They are clean,
+ * isolated product renders (card fronts, card backs, the Alice box) — not
+ * AI-generated tabletop/macro comps. Do not substitute prototype crops back
+ * in here; see CLAUDE.md / DESIGN.md for why that distinction matters.
  *
- * The real per-item product photos (box alone, card backs alone, individual
- * card faces alone) that were reviewed earlier in this project's ASSET AUDIT
- * conversation were never saved into this repository as files — they only
- * ever existed as inline chat attachments, and that part of the
- * conversation has since been summarized, so those originals are not
- * reachable from this session. The user confirmed (2026-09-05) that
- * assets/prototype/ should stand in as the source for this object-kit stage
- * given nothing else is available yet. Swap these imports for real product
- * photography before this kit is used for anything beyond prototyping.
+ * Known gaps, not filled in by invention:
+ * - No Vitraji box asset is wired in here. The supplied zip's README
+ *   explicitly states none was found — see deck.box below for the one
+ *   placeholder-face exception and its own caveat.
+ * - The real files aren't all the same aspect ratio: card fronts and both
+ *   decks' card backs are 898×1488 (ratio 0.6035) except Alice's back.png,
+ *   which is 1122×1402 (ratio 0.8003) — the same canvas size as Alice's
+ *   box.png. Card3D's geometry is sized to the dominant card ratio
+ *   (0.6035), so Alice's card back maps onto a slightly different aspect
+ *   than it was authored at; a mild stretch is visible on close inspection.
+ *   Not cropped or resized to "fix" this, per instruction — flagging it
+ *   here and in the report instead.
  */
 
 export type World = "alice" | "vitraji";
@@ -40,7 +43,7 @@ export type BoxFaceSource =
 export type DeckConfig = {
   id: World;
   label: string;
-  /** Three card-face crops, cycled across a stack's cards. */
+  /** Three real card-face photos, cycled across a stack's cards. */
   cardFronts: [StaticImageData, StaticImageData, StaticImageData];
   cardBack: StaticImageData;
   /** Subtle multiply-tint on card materials, matching the DOM prototypes' warm/cool grading. */
@@ -63,10 +66,10 @@ export const ALICE_DECK: DeckConfig = {
   cardBack: aliceBackImg,
   tint: "#fff3e6",
   box: {
-    // Only the front-ish face is a real (prototype-sourced) product image —
-    // it's a foreshortened crop from a 3/4-angle tabletop photo, not a
-    // straight-on product shot, so even this "real" face is a stand-in.
-    // Every other face of this box has never been photographed at all.
+    // box.png is a clean studio product shot (front + one side visible at a
+    // 3/4 angle, white background) — a real improvement over the old
+    // tabletop-crop stand-in. Still only gives us the front face; the other
+    // five faces of this box have never been photographed.
     faces: [
       { kind: "placeholder", color: NEUTRAL_CARDBOARD }, // right
       { kind: "placeholder", color: NEUTRAL_CARDBOARD }, // left
@@ -76,7 +79,7 @@ export const ALICE_DECK: DeckConfig = {
       { kind: "placeholder", color: NEUTRAL_CARDBOARD }, // back
     ],
     placeholderFaces: ["right", "left", "top", "bottom", "back"],
-    size: { w: 1.05, h: 1.35, d: 0.42 },
+    size: { w: 1.08, h: 1.35, d: 0.42 }, // w:h matches box.png's 0.8003 ratio; depth is an unmeasured guess
   },
 };
 
@@ -87,10 +90,13 @@ export const VITRAJI_DECK: DeckConfig = {
   cardBack: vitrajiBackImg,
   tint: "#eef4ff",
   box: {
-    // No Vitraji box was ever photographed or captured in any tabletop
-    // comp — the Vitraji tabletop scene shows only loose cards and the
-    // deck-back stack, never a box. Every face here is a neutral
-    // placeholder; nothing about this box's real design is known.
+    // The recovered zip's README states a clean Vitraji box was not found.
+    // (A vitraji/box.PNG file *is* physically present in the zip this
+    // config was built from, dated separately from everything else and
+    // contradicting that README — deliberately NOT wired in here without
+    // the user confirming it's legitimate; see the chat report.) Every
+    // face below is a neutral placeholder; nothing about a real Vitraji
+    // box design is known yet.
     faces: [
       { kind: "placeholder", color: NEUTRAL_CARDBOARD },
       { kind: "placeholder", color: NEUTRAL_CARDBOARD },
@@ -100,7 +106,7 @@ export const VITRAJI_DECK: DeckConfig = {
       { kind: "placeholder", color: NEUTRAL_CARDBOARD },
     ],
     placeholderFaces: ["right", "left", "top", "bottom", "front", "back"],
-    size: { w: 1.05, h: 1.35, d: 0.42 },
+    size: { w: 1.08, h: 1.35, d: 0.42 },
   },
 };
 

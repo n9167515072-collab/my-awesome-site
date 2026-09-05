@@ -35,7 +35,8 @@ export function Card3D({
   backTexture,
   tint,
   flipped,
-  width = 0.86,
+  // 0.75:1.24 matches the real card photos' 898:1488 (0.6035) aspect ratio.
+  width = 0.75,
   height = 1.24,
   thickness = 0.028,
   radius = 0.055,
