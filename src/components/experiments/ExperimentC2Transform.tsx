@@ -2,22 +2,16 @@
 
 import { useMemo, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { useTexture } from "@react-three/drei";
 import * as THREE from "three";
 
-import aliceBoxImg from "../../../assets/experiments/cards/alice-box.png";
-import aliceCard1Img from "../../../assets/experiments/cards/alice-card-1.png";
-import aliceCard2Img from "../../../assets/experiments/cards/alice-card-2.png";
-import aliceCard3Img from "../../../assets/experiments/cards/alice-card-3.png";
-import aliceBackImg from "../../../assets/experiments/cards/alice-deck-back.png";
-import vitrajiCard1Img from "../../../assets/experiments/cards/vitraji-card-1.png";
-import vitrajiCard2Img from "../../../assets/experiments/cards/vitraji-card-2.png";
-import vitrajiCard3Img from "../../../assets/experiments/cards/vitraji-card-3.png";
-import vitrajiBackImg from "../../../assets/experiments/cards/vitraji-deck-back.png";
+import { Card3D } from "@/components/object-kit/Card3D";
+import { TarotBox3D } from "@/components/object-kit/TarotBox3D";
+import { buildStackLayout, type CardLayout } from "@/components/object-kit/DeckStack3D";
+import { ALICE_DECK, DECKS, type World } from "@/components/object-kit/deck-config";
 
 // ---------------------------------------------------------------------------
-// math helpers (deliberately manual — motion's useTransform mis-clamps
-// keyframe ranges in the installed version; plain lerps are correct here too)
+// math helpers — deterministic, manual (no motion/react useTransform here;
+// this whole scene is R3F/Three.js, driven by a single elapsed-time ref)
 // ---------------------------------------------------------------------------
 function clamp01(v: number) {
   return Math.min(1, Math.max(0, v));
@@ -37,61 +31,54 @@ function seeded(i: number) {
   return x - Math.floor(x);
 }
 
-type World = "alice" | "vitraji";
-
-const CARD_W = 0.86;
-const CARD_H = 1.24;
-const CARD_T = 0.028;
-
 const CARDS_PER_GROUP = 12;
 const INTERACTIVE_PER_GROUP = 3;
 
-const BOX_W = 1.05;
-const BOX_H = 1.35;
-const BOX_Z = 1.6;
-
 const STACK_CENTER: Record<World, THREE.Vector3> = {
-  alice: new THREE.Vector3(-1.55, -0.05, 0),
-  vitraji: new THREE.Vector3(1.55, -0.05, 0),
+  alice: new THREE.Vector3(-1.6, -0.05, 0),
+  vitraji: new THREE.Vector3(1.6, -0.05, 0),
 };
 
-// phase durations (seconds), chained from the moment of the click
-const T_OPEN = 0.7;
-const T_RELEASE = 1.6;
-const T_CHAOS_HOLD = 1.2;
-const T_ORGANIZE = 1.55;
+const BOX_POS = new THREE.Vector3(0, 0, 1.7);
+
+// Phase durations (seconds since the click). Only Alice's box opens — the
+// intro deliberately starts from one object, not two.
+const T_OPEN = 0.85;
+const T_RELEASE = 1.7;
+const T_CHAOS_HOLD = 1.3;
+const T_ORGANIZE = 1.7;
 const OPEN_END = T_OPEN;
 const RELEASE_END = OPEN_END + T_RELEASE;
 const CHAOS_END = RELEASE_END + T_CHAOS_HOLD;
 const ORGANIZE_END = CHAOS_END + T_ORGANIZE;
 
-type CardSpec = {
+type FlightSpec = {
   id: string;
   group: World;
-  interactiveIndex: number | null;
-  frontKind: number;
+  layout: CardLayout;
   spawnStart: number;
   chaosPos: THREE.Vector3;
   chaosRot: THREE.Euler;
-  restPos: THREE.Vector3;
-  restRot: THREE.Euler;
-  fanPos: THREE.Vector3;
-  fanRot: THREE.Euler;
+  chaosScale: number;
+  showsBackInChaos: boolean;
+  revealAt: number;
 };
 
-function buildCards(): CardSpec[] {
-  const specs: CardSpec[] = [];
-  const groups: World[] = ["alice", "vitraji"];
-
-  groups.forEach((group, groupIndex) => {
+function buildFlightSpecs(): FlightSpec[] {
+  const specs: FlightSpec[] = [];
+  (["alice", "vitraji"] as World[]).forEach((group, groupIndex) => {
     const side = group === "alice" ? -1 : 1;
-    for (let localIndex = 0; localIndex < CARDS_PER_GROUP; localIndex++) {
+    const layout = buildStackLayout(CARDS_PER_GROUP, INTERACTIVE_PER_GROUP);
+    layout.forEach((cardLayout, localIndex) => {
       const globalIndex = groupIndex * CARDS_PER_GROUP + localIndex;
       const r1 = seeded(globalIndex * 3 + 1);
       const r2 = seeded(globalIndex * 3 + 2);
       const r3 = seeded(globalIndex * 3 + 3);
+      const r4 = seeded(globalIndex * 5 + 1);
 
-      // golden-angle spiral cloud, biased so a few cards swing close to camera
+      // golden-angle spiral cloud, biased so a few cards swing close to
+      // camera while most sit further back — an art-directed cloud, not a
+      // uniform random scatter.
       const golden = 2.399963;
       const angle = globalIndex * golden + side * 0.3;
       const radiusBand = 1.6 + (globalIndex % 5) * 0.42;
@@ -101,194 +88,81 @@ function buildCards(): CardSpec[] {
         (r2 - 0.5) * 4.4,
         closePass ? 2.4 + r3 * 1.6 : -2.6 - r3 * 2.4,
       );
-      const chaosRot = new THREE.Euler(
-        (r1 - 0.5) * Math.PI * 1.4,
-        (r2 - 0.5) * Math.PI * 1.6,
-        (r3 - 0.5) * Math.PI,
-      );
+      const chaosRot = new THREE.Euler((r1 - 0.5) * Math.PI * 1.4, (r2 - 0.5) * Math.PI * 1.6, (r3 - 0.5) * Math.PI);
+      const chaosScale = 0.82 + r4 * 0.36;
 
-      const interactiveIndex = localIndex < INTERACTIVE_PER_GROUP ? localIndex : null;
-      const mid = (INTERACTIVE_PER_GROUP - 1) / 2;
-
-      // resting position: interactive cards fan-ready but closed (tight
-      // pile with a hint of jitter); bulk cards form the stack's thickness
-      const restPos =
-        interactiveIndex !== null
-          ? STACK_CENTER[group].clone().add(new THREE.Vector3((interactiveIndex - mid) * 0.02, (interactiveIndex - mid) * -0.015, interactiveIndex * 0.006))
-          : STACK_CENTER[group]
-              .clone()
-              .add(new THREE.Vector3(side * -0.06, -0.02, -0.01 - (localIndex - INTERACTIVE_PER_GROUP) * 0.006));
-      const restRot =
-        interactiveIndex !== null
-          ? new THREE.Euler(0, 0, (interactiveIndex - mid) * 0.05)
-          : new THREE.Euler(0, 0, side * 0.14);
-
-      const fanPos =
-        interactiveIndex !== null
-          ? STACK_CENTER[group].clone().add(new THREE.Vector3((interactiveIndex - mid) * 0.5, Math.abs(interactiveIndex - mid) * 0.08 + 0.03, interactiveIndex * 0.01))
-          : restPos.clone();
-      const fanRot =
-        interactiveIndex !== null
-          ? new THREE.Euler(0, 0, (interactiveIndex - mid) * 0.32)
-          : restRot.clone();
+      const spawnStart = OPEN_END + (localIndex / CARDS_PER_GROUP) * T_RELEASE * 0.72 + r1 * 0.06;
+      // cards passing close to camera mostly show their (recognizable)
+      // front; the deep background cloud is mostly card backs.
+      const showsBackInChaos = closePass ? r2 < 0.25 : r2 < 0.72;
+      const revealAt = CHAOS_END + (localIndex / CARDS_PER_GROUP) * T_ORGANIZE * 0.5 + r3 * 0.15;
 
       specs.push({
         id: `${group}-${localIndex}`,
         group,
-        interactiveIndex,
-        frontKind: localIndex % 3,
-        spawnStart: OPEN_END + (localIndex / CARDS_PER_GROUP) * T_RELEASE * 0.72 + r1 * 0.06,
+        layout: cardLayout,
+        spawnStart,
         chaosPos,
         chaosRot,
-        restPos,
-        restRot,
-        fanPos,
-        fanRot,
+        chaosScale,
+        showsBackInChaos,
+        revealAt,
       });
-    }
+    });
   });
-
   return specs;
 }
 
-const CARD_SPECS = buildCards();
+const FLIGHT_SPECS = buildFlightSpecs();
 
 type Phase = "closed" | "opening" | "catalogue";
 
-function useSharedMaterials() {
-  const aliceFrontTex = useTexture([aliceCard1Img.src, aliceCard2Img.src, aliceCard3Img.src]);
-  const vitrajiFrontTex = useTexture([vitrajiCard1Img.src, vitrajiCard2Img.src, vitrajiCard3Img.src]);
-  const aliceBackTex = useTexture(aliceBackImg.src);
-  const vitrajiBackTex = useTexture(vitrajiBackImg.src);
-  const boxTex = useTexture(aliceBoxImg.src);
-
-  return useMemo(() => {
-    const edge = new THREE.MeshStandardMaterial({ color: "#efe6d3", roughness: 0.6 });
-    const aliceBack = new THREE.MeshStandardMaterial({ map: aliceBackTex, roughness: 0.55 });
-    const vitrajiBack = new THREE.MeshStandardMaterial({ map: vitrajiBackTex, roughness: 0.55 });
-    const aliceFronts = aliceFrontTex.map((t) => new THREE.MeshStandardMaterial({ map: t, roughness: 0.5 }));
-    const vitrajiFronts = vitrajiFrontTex.map((t) => new THREE.MeshStandardMaterial({ map: t, roughness: 0.5 }));
-
-    const boxTop = boxTex.clone();
-    boxTop.needsUpdate = true;
-    boxTop.repeat.set(1, 0.5);
-    boxTop.offset.set(0, 0.5);
-    const boxBottom = boxTex.clone();
-    boxBottom.needsUpdate = true;
-    boxBottom.repeat.set(1, 0.5);
-    boxBottom.offset.set(0, 0);
-
-    return {
-      edge,
-      backs: { alice: aliceBack, vitraji: vitrajiBack },
-      fronts: { alice: aliceFronts, vitraji: vitrajiFronts },
-      boxTopMat: new THREE.MeshStandardMaterial({ map: boxTop, roughness: 0.6, side: THREE.DoubleSide }),
-      boxBottomMat: new THREE.MeshStandardMaterial({ map: boxBottom, roughness: 0.6, side: THREE.DoubleSide }),
-    };
-  }, [aliceFrontTex, vitrajiFrontTex, aliceBackTex, vitrajiBackTex, boxTex]);
-}
-
-function DeckBox({
-  phaseRef,
-  tRef,
-  mats,
-}: {
-  phaseRef: React.RefObject<Phase>;
-  tRef: React.RefObject<number>;
-  mats: ReturnType<typeof useSharedMaterials>;
-}) {
-  const topRef = useRef<THREE.Mesh>(null);
-  const bottomRef = useRef<THREE.Mesh>(null);
-  const spineRef = useRef<THREE.Mesh>(null);
-
-  const topGeo = useMemo(() => {
-    const g = new THREE.PlaneGeometry(BOX_W, BOX_H / 2);
-    g.translate(0, BOX_H / 4, 0);
-    return g;
-  }, []);
-  const bottomGeo = useMemo(() => {
-    const g = new THREE.PlaneGeometry(BOX_W, BOX_H / 2);
-    g.translate(0, -BOX_H / 4, 0);
-    return g;
-  }, []);
-
-  useFrame(({ clock }) => {
-    const t = tRef.current;
-    const phase = phaseRef.current;
-    const idle = phase === "closed" ? Math.sin(clock.elapsedTime * 0.9) * 0.05 : 0;
-    const idleRotY = phase === "closed" ? Math.sin(clock.elapsedTime * 0.6) * 0.12 : 0;
-
-    const openT = easeOutCubic(clamp01(t / T_OPEN));
-    const fadeT = clamp01((t - T_OPEN) / (T_OPEN * 0.6));
-    const scale = 1 - fadeT;
-
-    if (topRef.current) {
-      topRef.current.rotation.x = -openT * 2.05;
-      topRef.current.position.set(0, idle, BOX_Z);
-      topRef.current.rotation.y = idleRotY;
-      topRef.current.scale.setScalar(scale);
-      topRef.current.visible = scale > 0.01;
-    }
-    if (bottomRef.current) {
-      bottomRef.current.rotation.x = openT * 1.5;
-      bottomRef.current.position.set(0, idle, BOX_Z);
-      bottomRef.current.rotation.y = idleRotY;
-      bottomRef.current.scale.setScalar(scale);
-      bottomRef.current.visible = scale > 0.01;
-    }
-    if (spineRef.current) {
-      spineRef.current.position.set(0, idle, BOX_Z - 0.16);
-      spineRef.current.rotation.y = idleRotY;
-      spineRef.current.scale.setScalar(scale);
-      spineRef.current.visible = scale > 0.01;
-    }
-  });
-
-  return (
-    <group>
-      <mesh ref={topRef} geometry={topGeo} material={mats.boxTopMat} />
-      <mesh ref={bottomRef} geometry={bottomGeo} material={mats.boxBottomMat} />
-      <mesh ref={spineRef}>
-        <boxGeometry args={[BOX_W * 0.94, BOX_H * 0.94, 0.22]} />
-        <meshStandardMaterial color="#171512" roughness={0.8} />
-      </mesh>
-    </group>
-  );
-}
-
-function FlyingCard({
+function FlightCard({
   spec,
+  phase,
   phaseRef,
   tRef,
-  mats,
-  fanned,
-  flipped,
-  onToggleFan,
+  fanState,
+  flipState,
   onToggleFlip,
 }: {
-  spec: CardSpec;
+  spec: FlightSpec;
+  phase: Phase;
   phaseRef: React.RefObject<Phase>;
   tRef: React.RefObject<number>;
-  mats: ReturnType<typeof useSharedMaterials>;
-  fanned: boolean;
-  flipped: boolean;
-  onToggleFan: () => void;
+  fanState: Record<World, boolean>;
+  flipState: Set<string>;
   onToggleFlip: () => void;
 }) {
+  const deck = DECKS[spec.group];
   const groupRef = useRef<THREE.Group>(null);
-  const flipRef = useRef<THREE.Group>(null);
-  const hoverRef = useRef(0);
-  const settledPos = useRef(spec.restPos.clone());
-  const settledRot = useRef(new THREE.Euler().copy(spec.restRot));
+
+  const restPos = useMemo(() => STACK_CENTER[spec.group].clone().add(new THREE.Vector3(...spec.layout.rest.pos)), [spec]);
+  const fanPos = useMemo(() => STACK_CENTER[spec.group].clone().add(new THREE.Vector3(...spec.layout.fan.pos)), [spec]);
+  const restRotZ = spec.layout.rest.rot[2];
+  const fanRotZ = spec.layout.fan.rot[2];
+
+  const settledPos = useRef(restPos.clone());
+  const settledRotZ = useRef(restRotZ);
+
+  const [flippedState, setFlippedState] = useState(spec.showsBackInChaos);
+  const flippedRef = useRef(spec.showsBackInChaos);
 
   useFrame(() => {
     const t = tRef.current;
     const group = groupRef.current;
+
+    const shouldBeFlipped = t < spec.revealAt ? spec.showsBackInChaos : flipState.has(spec.id);
+    if (shouldBeFlipped !== flippedRef.current) {
+      flippedRef.current = shouldBeFlipped;
+      setFlippedState(shouldBeFlipped);
+    }
+
     if (!group) return;
 
     if (t < spec.spawnStart) {
       group.visible = false;
-      group.position.set(0, 0, BOX_Z);
+      group.position.copy(BOX_POS);
       group.scale.setScalar(0.001);
       return;
     }
@@ -300,127 +174,136 @@ function FlyingCard({
     if (t < CHAOS_END) {
       const eased = easeOutCubic(travelT);
       group.position.set(
-        lerp(0, spec.chaosPos.x, eased),
-        lerp(0, spec.chaosPos.y, eased),
-        lerp(BOX_Z, spec.chaosPos.z, eased),
+        lerp(BOX_POS.x, spec.chaosPos.x, eased),
+        lerp(BOX_POS.y, spec.chaosPos.y, eased),
+        lerp(BOX_POS.z, spec.chaosPos.z, eased),
       );
-      group.rotation.set(
-        lerp(0, spec.chaosRot.x, eased),
-        lerp(0, spec.chaosRot.y, eased),
-        lerp(0, spec.chaosRot.z, eased),
-      );
-      group.scale.setScalar(popScale);
+      group.rotation.set(lerp(0, spec.chaosRot.x, eased), lerp(0, spec.chaosRot.y, eased), lerp(0, spec.chaosRot.z, eased));
+      group.scale.setScalar(popScale * lerp(1, spec.chaosScale, eased));
+      settledPos.current.copy(group.position);
+      settledRotZ.current = spec.chaosRot.z;
     } else if (t < ORGANIZE_END) {
       const orgT = easeInOutCubic(clamp01((t - CHAOS_END) / T_ORGANIZE));
       group.position.set(
-        lerp(spec.chaosPos.x, spec.restPos.x, orgT),
-        lerp(spec.chaosPos.y, spec.restPos.y, orgT),
-        lerp(spec.chaosPos.z, spec.restPos.z, orgT),
+        lerp(spec.chaosPos.x, restPos.x, orgT),
+        lerp(spec.chaosPos.y, restPos.y, orgT),
+        lerp(spec.chaosPos.z, restPos.z, orgT),
       );
-      group.rotation.set(
-        lerp(spec.chaosRot.x, spec.restRot.x, orgT),
-        lerp(spec.chaosRot.y, spec.restRot.y, orgT),
-        lerp(spec.chaosRot.z, spec.restRot.z, orgT),
-      );
-      group.scale.setScalar(1);
+      group.rotation.set(lerp(spec.chaosRot.x, 0, orgT), lerp(spec.chaosRot.y, 0, orgT), lerp(spec.chaosRot.z, restRotZ, orgT));
+      group.scale.setScalar(lerp(spec.chaosScale, 1, orgT));
       settledPos.current.copy(group.position);
-      settledRot.current.copy(group.rotation);
+      settledRotZ.current = lerp(spec.chaosRot.z, restRotZ, orgT);
     } else {
-      // catalogue: spring toward rest or fan target
-      const target = fanned ? spec.fanPos : spec.restPos;
-      const targetRot = fanned ? spec.fanRot : spec.restRot;
-      const hoverTarget = spec.interactiveIndex !== null ? hoverRef.current : 0;
-      settledPos.current.x = lerp(settledPos.current.x, target.x, 0.12);
-      settledPos.current.y = lerp(settledPos.current.y, target.y + hoverTarget * 0.05, 0.12);
-      settledPos.current.z = lerp(settledPos.current.z, target.z + hoverTarget * 0.12, 0.12);
-      settledRot.current.x = lerp(settledRot.current.x, targetRot.x, 0.12);
-      settledRot.current.y = lerp(settledRot.current.y, targetRot.y, 0.12);
-      settledRot.current.z = lerp(settledRot.current.z, targetRot.z, 0.12);
+      const fanned = fanState[spec.group];
+      const target = fanned ? fanPos : restPos;
+      const targetRotZ = fanned ? fanRotZ : restRotZ;
+      settledPos.current.x = lerp(settledPos.current.x, target.x, 0.14);
+      settledPos.current.y = lerp(settledPos.current.y, target.y, 0.14);
+      settledPos.current.z = lerp(settledPos.current.z, target.z, 0.14);
+      settledRotZ.current = lerp(settledRotZ.current, targetRotZ, 0.14);
       group.position.copy(settledPos.current);
-      group.rotation.set(settledRot.current.x, settledRot.current.y, settledRot.current.z);
-      group.scale.setScalar(1 + hoverTarget * 0.04);
-    }
-
-    if (flipRef.current) {
-      const targetFlip = flipped ? Math.PI : 0;
-      flipRef.current.rotation.y = lerp(flipRef.current.rotation.y, targetFlip, 0.16);
+      group.rotation.set(0, 0, settledRotZ.current);
+      group.scale.setScalar(1);
     }
   });
 
-  const frontMat = mats.fronts[spec.group][spec.frontKind];
-  const backMat = mats.backs[spec.group];
-  const materials = [mats.edge, mats.edge, mats.edge, mats.edge, frontMat, backMat];
-
-  const interactive = spec.interactiveIndex !== null;
-
-  function handleClick(e: { stopPropagation: () => void }) {
-    e.stopPropagation();
-    if (phaseRef.current !== "catalogue" || !interactive) return;
-    if (!fanned) onToggleFan();
-    else onToggleFlip();
-  }
+  const interactive = phase === "catalogue" && fanState[spec.group] && spec.layout.interactiveIndex !== null;
 
   return (
     <group ref={groupRef}>
-      <group
-        ref={flipRef}
-        onClick={interactive ? handleClick : undefined}
-        onPointerOver={interactive ? () => (hoverRef.current = 1) : undefined}
-        onPointerOut={interactive ? () => (hoverRef.current = 0) : undefined}
-      >
-        <mesh material={materials}>
-          <boxGeometry args={[CARD_W, CARD_H, CARD_T]} />
-        </mesh>
-      </group>
+      <Card3D
+        frontTexture={deck.cardFronts[spec.layout.frontIndex]}
+        backTexture={deck.cardBack}
+        tint={deck.tint}
+        flipped={flippedState}
+        interactive={interactive}
+        onClick={() => {
+          if (phaseRef.current !== "catalogue" || !fanState[spec.group]) return;
+          onToggleFlip();
+        }}
+      />
     </group>
   );
 }
 
+function StackHitArea({ group, onFan }: { group: World; onFan: () => void }) {
+  const pos = STACK_CENTER[group];
+  return (
+    <mesh
+      position={[pos.x, pos.y, pos.z + 0.06]}
+      visible={false}
+      onClick={(e) => {
+        e.stopPropagation();
+        onFan();
+      }}
+    >
+      <planeGeometry args={[1.3, 1.7]} />
+    </mesh>
+  );
+}
+
 function Scene({
+  phase,
   phaseRef,
   tRef,
+  openProgressRef,
   fanState,
   flipState,
   onToggleFan,
   onToggleFlip,
 }: {
+  phase: Phase;
   phaseRef: React.RefObject<Phase>;
   tRef: React.RefObject<number>;
+  openProgressRef: React.RefObject<number>;
   fanState: Record<World, boolean>;
   flipState: Set<string>;
   onToggleFan: (g: World) => void;
   onToggleFlip: (id: string) => void;
 }) {
-  const mats = useSharedMaterials();
+  const boxWrapperRef = useRef<THREE.Group>(null);
 
   useFrame((_state, delta) => {
     if (phaseRef.current !== "closed") {
       tRef.current += delta;
+    }
+    const t = tRef.current;
+    openProgressRef.current = easeOutCubic(clamp01(t / T_OPEN));
+
+    if (boxWrapperRef.current) {
+      const fadeT = clamp01((t - OPEN_END) / (T_OPEN * 0.6));
+      const scale = 1 - fadeT;
+      boxWrapperRef.current.scale.setScalar(scale);
+      boxWrapperRef.current.visible = scale > 0.01;
     }
   });
 
   return (
     <>
       <color attach="background" args={["#0a0908"]} />
-      <ambientLight intensity={0.6} />
+      <ambientLight intensity={0.65} />
       <directionalLight position={[2.5, 3, 4]} intensity={1.1} />
       <directionalLight position={[-3, -1, -2]} intensity={0.35} />
 
-      <DeckBox phaseRef={phaseRef} tRef={tRef} mats={mats} />
+      <group ref={boxWrapperRef} position={BOX_POS.toArray()}>
+        <TarotBox3D deck={ALICE_DECK} openProgress={openProgressRef} interactive={phase === "closed"} />
+      </group>
 
-      {CARD_SPECS.map((spec) => (
-        <FlyingCard
+      {FLIGHT_SPECS.map((spec) => (
+        <FlightCard
           key={spec.id}
           spec={spec}
+          phase={phase}
           phaseRef={phaseRef}
           tRef={tRef}
-          mats={mats}
-          fanned={fanState[spec.group]}
-          flipped={flipState.has(spec.id)}
-          onToggleFan={() => onToggleFan(spec.group)}
+          fanState={fanState}
+          flipState={flipState}
           onToggleFlip={() => onToggleFlip(spec.id)}
         />
       ))}
+
+      {phase === "catalogue" && !fanState.alice && <StackHitArea group="alice" onFan={() => onToggleFan("alice")} />}
+      {phase === "catalogue" && !fanState.vitraji && <StackHitArea group="vitraji" onFan={() => onToggleFan("vitraji")} />}
     </>
   );
 }
@@ -429,9 +312,9 @@ export function ExperimentC2Transform() {
   const [phase, setPhase] = useState<Phase>("closed");
   const phaseRef = useRef<Phase>("closed");
   const tRef = useRef(0);
+  const openProgressRef = useRef(0);
   const [fanState, setFanState] = useState<Record<World, boolean>>({ alice: false, vitraji: false });
   const [flipState, setFlipState] = useState<Set<string>>(new Set());
-  const [showCatalogueLabels, setShowCatalogueLabels] = useState(false);
 
   function goPhase(next: Phase) {
     phaseRef.current = next;
@@ -442,10 +325,6 @@ export function ExperimentC2Transform() {
     if (phaseRef.current !== "closed") return;
     tRef.current = 0;
     goPhase("opening");
-    window.setTimeout(() => {
-      if (phaseRef.current === "opening") goPhase("catalogue");
-      setShowCatalogueLabels(true);
-    }, ORGANIZE_END * 1000);
   }
 
   function toggleFan(group: World) {
@@ -464,13 +343,16 @@ export function ExperimentC2Transform() {
     <div className="relative h-dvh w-full overflow-hidden bg-[#0a0908]">
       <Canvas camera={{ fov: 45, position: [0, 0, 6] }} dpr={[1, 2]}>
         <Scene
+          phase={phase}
           phaseRef={phaseRef}
           tRef={tRef}
+          openProgressRef={openProgressRef}
           fanState={fanState}
           flipState={flipState}
           onToggleFan={toggleFan}
           onToggleFlip={toggleFlip}
         />
+        <PhaseWatcher phaseRef={phaseRef} tRef={tRef} onCatalogue={() => goPhase("catalogue")} />
       </Canvas>
 
       {phase === "closed" && (
@@ -478,30 +360,42 @@ export function ExperimentC2Transform() {
           type="button"
           onClick={handleStart}
           aria-label="Открыть колоду"
-          className="absolute inset-0 z-10 cursor-pointer"
+          className="absolute left-1/2 top-1/2 z-10 h-[70%] w-[42%] -translate-x-1/2 -translate-y-1/2 cursor-pointer"
         />
       )}
 
       <p className="pointer-events-none absolute left-6 top-6 z-20 text-[10px] font-medium tracking-[0.3em] text-white/40 sm:left-10 sm:top-8">
-        EXPERIMENT C2 — INTRO BECOMES CATALOGUE
+        EXPERIMENT C2 — BOX BECOMES CATALOGUE
       </p>
 
-      {phase === "closed" && (
-        <p className="pointer-events-none absolute bottom-10 left-1/2 z-20 -translate-x-1/2 text-[10px] font-medium tracking-[0.35em] text-white/40">
-          НАЖМИТЕ
-        </p>
-      )}
-
-      {showCatalogueLabels && (
+      {phase === "catalogue" && (
         <>
-          <p className="pointer-events-none absolute bottom-10 left-[28%] z-20 -translate-x-1/2 text-[11px] font-medium tracking-[0.35em] text-white/70 transition-opacity duration-700">
+          <p className="pointer-events-none absolute bottom-10 left-[28%] z-20 -translate-x-1/2 text-[11px] font-medium tracking-[0.35em] text-white/70">
             АЛИСА
           </p>
-          <p className="pointer-events-none absolute bottom-10 left-[72%] z-20 -translate-x-1/2 text-[11px] font-medium tracking-[0.35em] text-white/70 transition-opacity duration-700">
+          <p className="pointer-events-none absolute bottom-10 left-[72%] z-20 -translate-x-1/2 text-[11px] font-medium tracking-[0.35em] text-white/70">
             ВИТРАЖИ
           </p>
         </>
       )}
     </div>
   );
+}
+
+/** Lives inside the Canvas purely to watch the shared time ref and fire the one-time phase transition via real React state. */
+function PhaseWatcher({
+  phaseRef,
+  tRef,
+  onCatalogue,
+}: {
+  phaseRef: React.RefObject<Phase>;
+  tRef: React.RefObject<number>;
+  onCatalogue: () => void;
+}) {
+  useFrame(() => {
+    if (phaseRef.current === "opening" && tRef.current >= ORGANIZE_END) {
+      onCatalogue();
+    }
+  });
+  return null;
 }

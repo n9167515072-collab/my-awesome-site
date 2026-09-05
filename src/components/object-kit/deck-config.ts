@@ -1,6 +1,6 @@
 import type { StaticImageData } from "next/image";
 
-import aliceBoxImg from "../../../assets/product/alice/box.png";
+import aliceBoxFrontImg from "../../../assets/product/alice/box-front-texture.png";
 import aliceBackImg from "../../../assets/product/alice/back.png";
 import aliceCard1Img from "../../../assets/product/alice/card-01.png";
 import aliceCard2Img from "../../../assets/product/alice/card-02.png";
@@ -57,6 +57,11 @@ export type DeckConfig = {
   };
 };
 
+// Sampled (mean pixel color, ImageMagick) from the real left-side panel of
+// alice/box.png — not an invented/branded color, just this box's own dark
+// desaturated background tone.
+const ALICE_CARDBOARD = "#403e3e";
+// No Vitraji box pixels exist to sample from at all; this is a generic guess.
 const NEUTRAL_CARDBOARD = "#2a2723";
 
 export const ALICE_DECK: DeckConfig = {
@@ -66,20 +71,22 @@ export const ALICE_DECK: DeckConfig = {
   cardBack: aliceBackImg,
   tint: "#fff3e6",
   box: {
-    // box.png is a clean studio product shot (front + one side visible at a
-    // 3/4 angle, white background) — a real improvement over the old
-    // tabletop-crop stand-in. Still only gives us the front face; the other
-    // five faces of this box have never been photographed.
+    // box-front-texture.png is the front face ONLY, perspective-corrected
+    // (ImageMagick -distort Perspective against 4 manually-identified
+    // corner points) out of the original box.png studio photo, then cropped
+    // to exactly that quad — flat, rectangular, no white background, no
+    // shadow, no invented pixels. See git history for box.png (the original
+    // 3/4-angle photo) if the correction ever needs redoing.
     faces: [
-      { kind: "placeholder", color: NEUTRAL_CARDBOARD }, // right
-      { kind: "placeholder", color: NEUTRAL_CARDBOARD }, // left
-      { kind: "placeholder", color: NEUTRAL_CARDBOARD }, // top
-      { kind: "placeholder", color: NEUTRAL_CARDBOARD }, // bottom
-      { kind: "real", texture: aliceBoxImg }, // front
-      { kind: "placeholder", color: NEUTRAL_CARDBOARD }, // back
+      { kind: "placeholder", color: ALICE_CARDBOARD }, // right
+      { kind: "placeholder", color: ALICE_CARDBOARD }, // left
+      { kind: "placeholder", color: ALICE_CARDBOARD }, // top
+      { kind: "placeholder", color: ALICE_CARDBOARD }, // bottom
+      { kind: "real", texture: aliceBoxFrontImg }, // front
+      { kind: "placeholder", color: ALICE_CARDBOARD }, // back
     ],
     placeholderFaces: ["right", "left", "top", "bottom", "back"],
-    size: { w: 1.08, h: 1.35, d: 0.42 }, // w:h matches box.png's 0.8003 ratio; depth is an unmeasured guess
+    size: { w: 0.76, h: 1.35, d: 0.42 }, // w:h matches box-front-texture.png's measured 0.5636 ratio; depth is an unmeasured guess
   },
 };
 

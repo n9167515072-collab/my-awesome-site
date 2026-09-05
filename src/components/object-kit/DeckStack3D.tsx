@@ -7,7 +7,7 @@ import * as THREE from "three";
 import { Card3D } from "./Card3D";
 import type { DeckConfig } from "./deck-config";
 
-type CardLayout = {
+export type CardLayout = {
   id: number;
   interactiveIndex: number | null;
   frontIndex: number;
@@ -15,7 +15,8 @@ type CardLayout = {
   fan: { pos: [number, number, number]; rot: [number, number, number] };
 };
 
-function buildLayout(cardCount: number, interactiveCount: number): CardLayout[] {
+/** Exported so other consumers (e.g. the C2 intro) can arrive at exactly this resting/fan layout. */
+export function buildStackLayout(cardCount: number, interactiveCount: number): CardLayout[] {
   const mid = (interactiveCount - 1) / 2;
   return Array.from({ length: cardCount }, (_, i) => {
     const interactiveIndex = i < interactiveCount ? i : null;
@@ -107,7 +108,7 @@ export function DeckStack3D({ deck, cardCount = 12, interactiveCount = 3, fanned
   const fanned = fannedProp ?? internalFanned;
   const [flipped, setFlipped] = useState<Set<number>>(new Set());
 
-  const layout = useMemo(() => buildLayout(cardCount, interactiveCount), [cardCount, interactiveCount]);
+  const layout = useMemo(() => buildStackLayout(cardCount, interactiveCount), [cardCount, interactiveCount]);
 
   function setFanned(next: boolean) {
     setInternalFanned(next);
